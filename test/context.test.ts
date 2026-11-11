@@ -94,6 +94,20 @@ describe('buildContext', () => {
     expect(totalChars(result)).toBeLessThanOrEqual(60);
   });
 
+  it('最新用户预算不足一个截断标记时仍严格限制字符数', () => {
+    const system: Message = { role: 'system', content: '规' };
+    const marker: Message = { role: 'system', content: CONTEXT_OMITTED };
+    const budget = totalChars([system, marker]) + 3;
+
+    const result = buildContext(
+      [system, { role: 'user', content: '需要截断的最新用户目标'.repeat(3) }],
+      budget,
+    );
+
+    expect(result.at(-1)).toEqual({ role: 'user', content: CONTEXT_TRUNCATED.slice(0, 3) });
+    expect(totalChars(result)).toBeLessThanOrEqual(budget);
+  });
+
   it('assistant toolCalls 与对应 tool 同组保留或同组省略', () => {
     const assistant: Message = {
       role: 'assistant',

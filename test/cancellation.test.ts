@@ -182,6 +182,60 @@ describe('runAgentLoop 协作式取消', () => {
     expect(events.at(-1)).toEqual({ type: 'run_cancelled', turn: 1 });
   });
 
+  it('轮次事件后、模型调用前取消时不请求模型', async () => {
+    const controller = new AbortController();
+    const events: AgentEvent[] = [];
+    let calls = 0;
+
+    const result = await runAgentLoop({
+      provider: {
+        name: 'spy',
+        chat: () => {
+          calls += 1;
+          return Promise.reject(new Error('不应调用'));
+        },
+      },
+      registry: new ToolRegistry(),
+      messages: [{ role: 'user', content: 'go' }],
+      maxTurns: 3,
+      maxTokens: 128,
+      workspaceRoot: '.',
+      signal: controller.signal,
+      eventSink: {
+        emit(event) {
+          events.push(event);
+          if (event.type === 'turn_started') controller.abort();
+        },
+      },
+    });
+
+    expect(calls).toBe(0);
+    expect(result.stopReason).toBe('cancelled');
+    expect(result.turns).toBe(1);
+    expect(events).toEqual([
+      { type: 'turn_started', turn: 1, messageCount: 1 },
+      { type: 'run_cancelled', turn: 1 },
+    ]);
+  });
+
+  it('非取消模型错误原样抛出且不发出取消事件', async () => {
+    const failure = new Error('协议失败');
+    const events: AgentEvent[] = [];
+
+    await expect(
+      runAgentLoop({
+        provider: { name: 'failing', chat: () => Promise.reject(failure) },
+        registry: new ToolRegistry(),
+        messages: [{ role: 'user', content: 'go' }],
+        maxTurns: 3,
+        maxTokens: 128,
+        workspaceRoot: '.',
+        eventSink: { emit: (event) => events.push(event) },
+      }),
+    ).rejects.toBe(failure);
+    expect(events.map((event) => event.type)).toEqual(['turn_started']);
+  });
+
   it('把同一个 signal 传给 Provider 和工具上下文', async () => {
     const controller = new AbortController();
     const requestSignals: (AbortSignal | undefined)[] = [];
