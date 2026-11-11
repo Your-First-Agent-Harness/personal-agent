@@ -185,7 +185,12 @@ describe('write_file Loop 集成', () => {
       registry.register(tool);
     }
 
-    expect(registry.list().map((tool) => tool.name)).toEqual(['read_file', 'list_dir', 'write_file']);
+    expect(registry.list().map((tool) => tool.name)).toEqual([
+      'read_file',
+      'list_dir',
+      'write_file',
+      'edit_file',
+    ]);
 
     const result = await runAgentLoop({
       provider,
