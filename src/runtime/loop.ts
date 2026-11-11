@@ -1,7 +1,8 @@
 import { buildContext } from '../context/build.ts';
 import type { Message } from '../core/message.ts';
 import type { AgentStopReason, EventSink } from '../core/event.ts';
-import type { ModelProvider, TokenUsage } from '../adapters/model/provider.ts';
+import { ModelCancelledError } from '../adapters/model/provider.ts';
+import type { ChatResult, ModelProvider, TokenUsage } from '../adapters/model/provider.ts';
 import type { ToolRegistry } from '../tools/registry.ts';
 
 export interface AgentLoopOptions {
@@ -13,6 +14,7 @@ export interface AgentLoopOptions {
   readonly maxContextChars?: number;
   readonly workspaceRoot: string;
   readonly eventSink?: EventSink;
+  readonly signal?: AbortSignal;
 }
 
 export type StopReason = AgentStopReason;
@@ -38,16 +40,37 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   const messages: Message[] = [...options.messages];
   const tools = options.registry.list();
   const usage = { inputTokens: 0, outputTokens: 0 };
+  const cancelled = (turn: number): AgentLoopResult => {
+    options.eventSink?.emit({ type: 'run_cancelled', turn });
+    return { messages, text: '', turns: turn, stopReason: 'cancelled', usage };
+  };
+
+  if (options.signal?.aborted) {
+    return cancelled(0);
+  }
 
   for (let turn = 1; turn <= options.maxTurns; turn += 1) {
     options.eventSink?.emit({ type: 'turn_started', turn, messageCount: messages.length });
 
+    if (options.signal?.aborted) {
+      return cancelled(turn);
+    }
+
     const requestMessages = buildContext(messages, options.maxContextChars ?? 24_000);
-    const result = await options.provider.chat({
-      messages: requestMessages,
-      maxTokens: options.maxTokens,
-      tools,
-    });
+    let result: ChatResult;
+    try {
+      result = await options.provider.chat({
+        messages: requestMessages,
+        maxTokens: options.maxTokens,
+        tools,
+        signal: options.signal,
+      });
+    } catch (error) {
+      if (error instanceof ModelCancelledError) {
+        return cancelled(turn);
+      }
+      throw error;
+    }
 
     if (result.usage !== undefined) {
       usage.inputTokens += result.usage.inputTokens;
@@ -74,6 +97,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
 
     // 串行执行：同一轮里的多个调用按模型给出的顺序来，并行是后面单独的一天
     for (const call of toolCalls) {
+      if (options.signal?.aborted) {
+        return cancelled(turn);
+      }
       options.eventSink?.emit({
         type: 'tool_call_started',
         turn,
@@ -82,6 +108,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       });
       const toolResult = await options.registry.execute(call, {
         workspaceRoot: options.workspaceRoot,
+        signal: options.signal,
       });
       options.eventSink?.emit({
         type: 'tool_call_finished',

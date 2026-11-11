@@ -1,4 +1,5 @@
 import type { Message, ToolCall } from '../../core/message.ts';
+import { ModelCancelledError } from './provider.ts';
 import type { ChatRequest, ChatResult, ModelProvider, TokenUsage } from './provider.ts';
 
 export interface OpenAICompatibleOptions {
@@ -31,6 +32,15 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
     name: options.model,
 
     async chat(request: ChatRequest): Promise<ChatResult> {
+      if (request.signal?.aborted) {
+        throw new ModelCancelledError();
+      }
+
+      const signals = [AbortSignal.timeout(timeoutMs)];
+      if (request.signal !== undefined) {
+        signals.push(request.signal);
+      }
+
       let response: Response;
       try {
         response = await fetchImpl(`${baseUrl}/chat/completions`, {
@@ -56,9 +66,12 @@ export function createOpenAICompatibleProvider(options: OpenAICompatibleOptions)
                 }
               : {}),
           }),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: AbortSignal.any(signals),
         });
       } catch (error) {
+        if (request.signal?.aborted) {
+          throw new ModelCancelledError();
+        }
         throw new ModelError(`请求模型失败：${describeError(error)}`, { cause: error });
       }
 

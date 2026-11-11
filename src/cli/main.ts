@@ -37,6 +37,9 @@ if (config.model.provider !== 'openai-compatible') {
     model: config.model.name,
   });
 
+  const controller = new AbortController();
+  process.once('SIGINT', () => controller.abort());
+
   const registry = new ToolRegistry();
   for (const tool of createBuiltinTools()) {
     registry.register(tool);
@@ -66,6 +69,7 @@ if (config.model.provider !== 'openai-compatible') {
       maxContextChars: config.agent.maxContextChars,
       workspaceRoot: config.workspace.root,
       eventSink: createLoggerEventSink(logger),
+      signal: controller.signal,
     });
 
     session.append(result.messages.slice(before.length));
@@ -75,6 +79,9 @@ if (config.model.provider !== 'openai-compatible') {
       latencyMs: Date.now() - startedAt,
       usage: result.usage,
     });
+    if (result.stopReason === 'cancelled') {
+      return '任务已取消。';
+    }
     return result.stopReason === 'max_turns'
       ? `已达到最大轮次 ${config.agent.maxTurns}，任务未收敛。最后一条消息：\n${JSON.stringify(result.messages.at(-1))}`
       : result.text;

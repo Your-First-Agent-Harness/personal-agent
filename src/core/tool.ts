@@ -14,6 +14,7 @@ export interface ToolSchema {
 
 export interface ToolContext {
   readonly workspaceRoot: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface ToolResult {
