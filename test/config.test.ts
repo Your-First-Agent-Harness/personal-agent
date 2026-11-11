@@ -101,4 +101,19 @@ describe('loadConfig', () => {
 
     expect(() => loadConfig({ cwd: dir, env: {} })).toThrow(ConfigError);
   });
+
+  it.each([
+    { name: '根节点不是对象', content: [], message: '配置文件必须是对象' },
+    { name: '配置分组不是对象', content: { agent: [] }, message: '配置项 agent 必须是对象' },
+    {
+      name: '字符串字段类型错误',
+      content: { model: { name: 42 } },
+      message: '配置项 model.name 必须是字符串',
+    },
+  ])('$name 时直接报错', ({ content, message }) => {
+    const dir = tempDir();
+    writeConfig(dir, content);
+
+    expect(() => loadConfig({ cwd: dir, env: {} })).toThrow(message);
+  });
 });

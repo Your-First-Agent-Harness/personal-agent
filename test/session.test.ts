@@ -77,4 +77,29 @@ describe('Session', () => {
     expect(left.snapshot()).toEqual([{ role: 'user', content: '只属于左边' }]);
     expect(right.snapshot()).toEqual([{ role: 'user', content: '只属于右边' }]);
   });
+
+  it('外部修改 toolCalls 不会穿透 Session 边界', () => {
+    const initial = {
+      role: 'assistant' as const,
+      content: '',
+      toolCalls: [{ id: 'initial', name: 'read_file', arguments: '{"path":"initial.ts"}' }],
+    };
+    const appended = {
+      role: 'assistant' as const,
+      content: '',
+      toolCalls: [{ id: 'appended', name: 'read_file', arguments: '{"path":"appended.ts"}' }],
+    };
+    const session = new Session('tool-calls', [initial]);
+    session.append([appended]);
+
+    initial.toolCalls[0]!.arguments = '{"path":"changed-initial.ts"}';
+    appended.toolCalls[0]!.arguments = '{"path":"changed-appended.ts"}';
+    const snapshot = session.snapshot();
+    Reflect.set(snapshot[0]!.toolCalls![0]!, 'arguments', '{"path":"changed-snapshot.ts"}');
+
+    expect(session.snapshot().map((message) => message.toolCalls?.[0]?.arguments)).toEqual([
+      '{"path":"initial.ts"}',
+      '{"path":"appended.ts"}',
+    ]);
+  });
 });

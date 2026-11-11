@@ -46,6 +46,16 @@ describe('createLogger', () => {
     expect(record(lines[0]).level).toBe('warn');
   });
 
+  it('error 日志不受默认 info 阈值过滤', () => {
+    const { lines, sink } = capture();
+    const logger = createLogger({ sink, now: fixedNow });
+
+    logger.error('失败', { code: 'E_TEST' });
+
+    expect(lines).toHaveLength(1);
+    expect(record(lines[0])).toMatchObject({ level: 'error', message: '失败', code: 'E_TEST' });
+  });
+
   it('child 派生的字段与调用时字段合并，调用时优先', () => {
     const { lines, sink } = capture();
     const logger = createLogger({ sink, now: fixedNow }).child({ traceId: 'trace-1' });
