@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 
 import type { Tool } from '../core/tool.ts';
+import { toolError } from './errors.ts';
 import { resolveInWorkspace } from './workspace.ts';
 
 const MAX_FILE_CHARS = 8000;
@@ -23,10 +24,20 @@ export const readFileTool: Tool = {
       const target = resolveInWorkspace(context, record['path']);
       const stat = statSync(target, { throwIfNoEntry: false });
       if (stat === undefined) {
-        return { content: `文件不存在：${String(record['path'])}`, isError: true };
+        return toolError(
+          'FILE_NOT_FOUND',
+          `文件不存在：${String(record['path'])}`,
+          true,
+          '请检查路径，或先用 list_dir 查看可用文件',
+        );
       }
       if (!stat.isFile()) {
-        return { content: `不是普通文件：${String(record['path'])}`, isError: true };
+        return toolError(
+          'NOT_A_FILE',
+          `不是普通文件：${String(record['path'])}`,
+          true,
+          '请改为普通文件路径',
+        );
       }
       const text = readFileSync(target, 'utf8');
       const truncated = text.length > MAX_FILE_CHARS;
@@ -52,7 +63,26 @@ export const listDirTool: Tool = {
   execute(args, context) {
     return Promise.resolve().then(() => {
       const record = (args ?? {}) as Record<string, unknown>;
-      const target = resolveInWorkspace(context, record['path'] ?? '.');
+      const rawPath = record['path'] ?? '.';
+      const target = resolveInWorkspace(context, rawPath);
+      const displayPath = typeof rawPath === 'string' ? rawPath : '.';
+      const stat = statSync(target, { throwIfNoEntry: false });
+      if (stat === undefined) {
+        return toolError(
+          'DIRECTORY_NOT_FOUND',
+          `目录不存在：${displayPath}`,
+          true,
+          '请检查目录路径',
+        );
+      }
+      if (!stat.isDirectory()) {
+        return toolError(
+          'NOT_A_DIRECTORY',
+          `不是目录：${displayPath}`,
+          true,
+          '请改为目录路径',
+        );
+      }
       const entries = readdirSync(target, { withFileTypes: true })
         .filter((entry) => entry.name !== 'node_modules' && entry.name !== '.git')
         .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))

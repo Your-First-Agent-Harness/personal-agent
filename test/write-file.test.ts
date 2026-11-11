@@ -87,21 +87,26 @@ describe('write_file', () => {
   it('拒绝非字符串 content', async () => {
     const root = workspace();
 
-    await expect(
-      writeFileTool.execute({ path: 'bad.txt', content: 42 }, { workspaceRoot: root }),
-    ).rejects.toThrow('content 必须是字符串');
+    const result = await writeFileTool.execute(
+      { path: 'bad.txt', content: 42 },
+      { workspaceRoot: root },
+    );
+
+    expect(result.content).toContain('content 必须是字符串');
+    expect(result.error?.code).toBe('INVALID_ARGUMENTS');
     expect(existsSync(join(root, 'bad.txt'))).toBe(false);
   });
 
   it('拒绝非布尔 overwrite', async () => {
     const root = workspace();
 
-    await expect(
-      writeFileTool.execute(
-        { path: 'bad.txt', content: 'text', overwrite: 'yes' },
-        { workspaceRoot: root },
-      ),
-    ).rejects.toThrow('overwrite 必须是布尔值');
+    const result = await writeFileTool.execute(
+      { path: 'bad.txt', content: 'text', overwrite: 'yes' },
+      { workspaceRoot: root },
+    );
+
+    expect(result.content).toContain('overwrite 必须是布尔值');
+    expect(result.error?.code).toBe('INVALID_ARGUMENTS');
     expect(existsSync(join(root, 'bad.txt'))).toBe(false);
   });
 

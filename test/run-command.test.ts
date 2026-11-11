@@ -178,12 +178,13 @@ describe('run_command', () => {
     async (timeoutMs) => {
       const root = workspace();
 
-      await expect(
-        runCommandTool.execute(
-          { command: nodeCommand(''), timeoutMs },
-          { workspaceRoot: root },
-        ),
-      ).rejects.toThrow('timeoutMs 必须是 1–30000 的整数');
+      const result = await runCommandTool.execute(
+        { command: nodeCommand(''), timeoutMs },
+        { workspaceRoot: root },
+      );
+
+      expect(result.content).toContain('timeoutMs 必须是 1–30000 的整数');
+      expect(result.error?.code).toBe('INVALID_ARGUMENTS');
     },
   );
 
@@ -192,9 +193,10 @@ describe('run_command', () => {
     async (args) => {
       const root = workspace();
 
-      await expect(runCommandTool.execute(args, { workspaceRoot: root })).rejects.toThrow(
-        'command 必须是非空字符串',
-      );
+      const result = await runCommandTool.execute(args, { workspaceRoot: root });
+
+      expect(result.content).toContain('command 必须是非空字符串');
+      expect(result.error?.code).toBe('INVALID_ARGUMENTS');
     },
   );
 

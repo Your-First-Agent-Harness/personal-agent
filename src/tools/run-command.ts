@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 
 import type { Tool, ToolResult } from '../core/tool.ts';
+import { toolError } from './errors.ts';
 
 const MAX_OUTPUT_CHARS = 8000;
 const MAX_TIMEOUT_MS = 30_000;
@@ -29,7 +30,12 @@ export const runCommandTool: Tool = {
     const command = record['command'];
     const timeoutMs = record['timeoutMs'] ?? 10_000;
     if (typeof command !== 'string' || command.trim() === '') {
-      throw new Error('command 必须是非空字符串');
+      return toolError(
+        'INVALID_ARGUMENTS',
+        'command 必须是非空字符串',
+        true,
+        '请提供一条要执行的 shell 命令',
+      );
     }
     if (
       typeof timeoutMs !== 'number' ||
@@ -37,7 +43,12 @@ export const runCommandTool: Tool = {
       timeoutMs <= 0 ||
       timeoutMs > MAX_TIMEOUT_MS
     ) {
-      throw new Error(`timeoutMs 必须是 1–${MAX_TIMEOUT_MS} 的整数`);
+      return toolError(
+        'INVALID_ARGUMENTS',
+        `timeoutMs 必须是 1–${MAX_TIMEOUT_MS} 的整数`,
+        true,
+        '请调整 timeoutMs 后重试',
+      );
     }
 
     return new Promise<ToolResult>((resolveResult) => {
@@ -79,18 +90,26 @@ export const runCommandTool: Tool = {
         settled = true;
         clearTimeout(timer);
         context.signal?.removeEventListener('abort', onAbort);
+        const content = JSON.stringify({
+          command,
+          exitCode,
+          timedOut,
+          cancelled,
+          stdout: stdoutTruncated ? `${stdout}\n…[stdout 已截断]` : stdout,
+          stderr: stderrTruncated ? `${stderr}\n…[stderr 已截断]` : stderr,
+          stdoutTruncated,
+          stderrTruncated,
+        });
+        const failure = cancelled
+          ? toolError('COMMAND_CANCELLED', '命令已被外部取消', false, '请重新发起任务')
+          : timedOut
+            ? toolError('COMMAND_TIMEOUT', `命令超过 ${timeoutMs}ms 超时`, true, '请缩短命令或提高超时上限内的 timeoutMs')
+            : exitCode !== 0
+              ? toolError('COMMAND_FAILED', `命令执行失败，退出码：${String(exitCode)}`, true, '请根据 stdout 和 stderr 修正后重试')
+              : undefined;
         resolveResult({
-          content: JSON.stringify({
-            command,
-            exitCode,
-            timedOut,
-            cancelled,
-            stdout: stdoutTruncated ? `${stdout}\n…[stdout 已截断]` : stdout,
-            stderr: stderrTruncated ? `${stderr}\n…[stderr 已截断]` : stderr,
-            stdoutTruncated,
-            stderrTruncated,
-          }),
-          ...(exitCode === 0 && !timedOut && !cancelled ? {} : { isError: true }),
+          content,
+          ...(failure === undefined ? {} : { isError: true, error: failure.error }),
         });
       };
       child.on('error', (error) => {

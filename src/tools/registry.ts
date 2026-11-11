@@ -1,5 +1,7 @@
 import type { ToolCall } from '../core/message.ts';
 import type { Tool, ToolContext, ToolResult, ToolSchema } from '../core/tool.ts';
+import { errorResult, normalizeError, toolError } from './errors.ts';
+import { validateArguments } from './schema.ts';
 
 export class ToolRegistry {
   private readonly tools = new Map<string, Tool>();
@@ -32,26 +34,36 @@ export class ToolRegistry {
   async execute(call: ToolCall, context: ToolContext): Promise<ToolResult> {
     const tool = this.tools.get(call.name);
     if (tool === undefined) {
-      return {
-        content: `未知工具：${call.name}。可用工具：${[...this.tools.keys()].join(', ')}`,
-        isError: true,
-      };
+      const available = [...this.tools.keys()].join(', ');
+      return toolError('UNKNOWN_TOOL', `未知工具：${call.name}`, true, `请改用已注册工具：${available}`);
     }
 
     let args: unknown;
     try {
       args = call.arguments.trim() === '' ? {} : JSON.parse(call.arguments);
     } catch {
-      return { content: `工具参数不是合法 JSON：${call.arguments}`, isError: true };
+      return toolError(
+        'INVALID_JSON',
+        '工具参数不是合法 JSON',
+        true,
+        '请把 arguments 修正为合法 JSON 对象',
+      );
+    }
+
+    const issue = validateArguments(tool.parameters, args);
+    if (issue !== undefined) {
+      return toolError(
+        'INVALID_ARGUMENTS',
+        `参数校验失败：${issue.path}，${issue.message}（期望 ${issue.expected}）`,
+        true,
+        `请修正 ${issue.path}：期望 ${issue.expected}；${issue.message}`,
+      );
     }
 
     try {
       return await tool.execute(args, context);
     } catch (error) {
-      return {
-        content: `工具执行失败：${error instanceof Error ? error.message : String(error)}`,
-        isError: true,
-      };
+      return errorResult(normalizeError(error));
     }
   }
 }

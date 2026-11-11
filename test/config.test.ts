@@ -34,6 +34,7 @@ describe('loadConfig', () => {
     expect(config.log.level).toBe('info');
     expect(config.agent.maxTurns).toBe(20);
     expect(config.agent.maxContextChars).toBe(24_000);
+    expect(config.agent.maxConsecutiveToolErrors).toBe(3);
     expect(config.model.provider).toBe('openai-compatible');
   });
 
@@ -41,7 +42,7 @@ describe('loadConfig', () => {
     const dir = tempDir();
     writeConfig(dir, {
       log: { level: 'warn' },
-      agent: { maxTurns: 8, maxContextChars: 12_000 },
+      agent: { maxTurns: 8, maxContextChars: 12_000, maxConsecutiveToolErrors: 5 },
     });
 
     const config = loadConfig({ cwd: dir, env: {} });
@@ -50,6 +51,7 @@ describe('loadConfig', () => {
     expect(config.agent.maxTurns).toBe(8);
     expect(config.agent.maxTokensPerTurn).toBe(4096);
     expect(config.agent.maxContextChars).toBe(12_000);
+    expect(config.agent.maxConsecutiveToolErrors).toBe(5);
   });
 
   it('环境变量覆盖配置文件', () => {
@@ -57,7 +59,7 @@ describe('loadConfig', () => {
     writeConfig(dir, {
       log: { level: 'warn' },
       model: { name: 'file-model' },
-      agent: { maxContextChars: 12_000 },
+      agent: { maxContextChars: 12_000, maxConsecutiveToolErrors: 5 },
     });
 
     const config = loadConfig({
@@ -67,6 +69,7 @@ describe('loadConfig', () => {
         PA_MODEL_NAME: 'env-model',
         PA_MAX_TURNS: '3',
         PA_MAX_CONTEXT_CHARS: '8000',
+        PA_MAX_CONSECUTIVE_TOOL_ERRORS: '4',
       },
     });
 
@@ -74,6 +77,7 @@ describe('loadConfig', () => {
     expect(config.model.name).toBe('env-model');
     expect(config.agent.maxTurns).toBe(3);
     expect(config.agent.maxContextChars).toBe(8000);
+    expect(config.agent.maxConsecutiveToolErrors).toBe(4);
   });
 
   it('非法日志级别直接报错，而不是静默降级', () => {
@@ -91,6 +95,14 @@ describe('loadConfig', () => {
     for (const value of ['0', '-1', '1.5', 'abc']) {
       expect(() =>
         loadConfig({ cwd: tempDir(), env: { PA_MAX_CONTEXT_CHARS: value } }),
+      ).toThrow(ConfigError);
+    }
+  });
+
+  it('连续工具错误上限为零或非法值时复用 ConfigError', () => {
+    for (const value of ['0', '-1', '1.5', 'abc']) {
+      expect(() =>
+        loadConfig({ cwd: tempDir(), env: { PA_MAX_CONSECUTIVE_TOOL_ERRORS: value } }),
       ).toThrow(ConfigError);
     }
   });

@@ -17,10 +17,51 @@ export interface ToolContext {
   readonly signal?: AbortSignal;
 }
 
+export type ToolErrorCode =
+  | 'UNKNOWN_TOOL'
+  | 'INVALID_JSON'
+  | 'INVALID_ARGUMENTS'
+  | 'PATH_OUTSIDE_WORKSPACE'
+  | 'FILE_NOT_FOUND'
+  | 'NOT_A_FILE'
+  | 'DIRECTORY_NOT_FOUND'
+  | 'NOT_A_DIRECTORY'
+  | 'FILE_EXISTS'
+  | 'PARENT_NOT_FOUND'
+  | 'EDIT_NO_MATCH'
+  | 'EDIT_MULTIPLE_MATCHES'
+  | 'DIFF_TOO_LARGE'
+  | 'COMMAND_FAILED'
+  | 'COMMAND_TIMEOUT'
+  | 'COMMAND_CANCELLED'
+  | 'INTERNAL_ERROR';
+
+export interface ToolErrorDetail {
+  readonly code: ToolErrorCode;
+  readonly message: string;
+  readonly retryable: boolean;
+  readonly hint?: string;
+}
+
+export class ToolError extends Error {
+  readonly code: ToolErrorCode;
+  readonly retryable: boolean;
+  readonly hint?: string;
+
+  constructor(code: ToolErrorCode, message: string, retryable: boolean, hint?: string) {
+    super(message);
+    this.name = 'ToolError';
+    this.code = code;
+    this.retryable = retryable;
+    this.hint = hint;
+  }
+}
+
 export interface ToolResult {
   readonly content: string;
   /** 失败也作为正常消息回喂给模型，而不是抛异常中断 loop */
   readonly isError?: boolean;
+  readonly error?: ToolErrorDetail;
 }
 
 export interface Tool extends ToolSchema {
