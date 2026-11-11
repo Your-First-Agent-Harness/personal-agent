@@ -190,6 +190,7 @@ describe('write_file Loop 集成', () => {
       'list_dir',
       'write_file',
       'edit_file',
+      'run_command',
     ]);
 
     const result = await runAgentLoop({
