@@ -5,12 +5,13 @@ import {
   createOpenAICompatibleProvider,
   ModelError,
 } from '../adapters/model/openai-compatible.ts';
-import type { Message } from '../core/message.ts';
+import { Session } from '../memory/session.ts';
 import { createLoggerEventSink } from '../observability/event-sink.ts';
 import { createLogger } from '../observability/logger.ts';
 import { runAgentLoop } from '../runtime/loop.ts';
 import { createBuiltinTools } from '../tools/fs.ts';
 import { ToolRegistry } from '../tools/registry.ts';
+import { runRepl } from './repl.ts';
 
 const config = loadConfig();
 const logger = createLogger({ level: config.log.level }).child({ traceId: randomUUID() });
@@ -23,10 +24,7 @@ logger.info('personal-agent 启动', {
   maxTurns: config.agent.maxTurns,
 });
 
-if (prompt === '') {
-  logger.error('缺少输入，用法：npm run dev -- "你的问题"');
-  process.exitCode = 1;
-} else if (config.model.provider !== 'openai-compatible') {
+if (config.model.provider !== 'openai-compatible') {
   logger.error('暂不支持该 Provider', { provider: config.model.provider });
   process.exitCode = 1;
 } else if (config.model.apiKey === undefined) {
@@ -44,7 +42,7 @@ if (prompt === '') {
     registry.register(tool);
   }
 
-  const messages: Message[] = [
+  const session = new Session(randomUUID(), [
     {
       role: 'system',
       content: [
@@ -52,32 +50,41 @@ if (prompt === '') {
         '需要读文件或看目录时，优先调用工具，不要凭记忆编造文件内容。',
       ].join('\n'),
     },
-    { role: 'user', content: prompt },
-  ];
+  ]);
+  let startedAt = Date.now();
 
-  const startedAt = Date.now();
-  try {
+  async function runTurn(input: string): Promise<string> {
+    session.append([{ role: 'user', content: input }]);
+    const before = session.snapshot();
+    startedAt = Date.now();
     const result = await runAgentLoop({
       provider,
       registry,
-      messages,
+      messages: before,
       maxTurns: config.agent.maxTurns,
       maxTokens: config.agent.maxTokensPerTurn,
       workspaceRoot: config.workspace.root,
       eventSink: createLoggerEventSink(logger),
     });
 
-    process.stdout.write(
-      result.stopReason === 'max_turns'
-        ? `已达到最大轮次 ${config.agent.maxTurns}，任务未收敛。最后一条消息：\n${JSON.stringify(result.messages.at(-1))}\n`
-        : `${result.text}\n`,
-    );
+    session.append(result.messages.slice(before.length));
     logger.info('运行结束', {
       stopReason: result.stopReason,
       turns: result.turns,
       latencyMs: Date.now() - startedAt,
       usage: result.usage,
     });
+    return result.stopReason === 'max_turns'
+      ? `已达到最大轮次 ${config.agent.maxTurns}，任务未收敛。最后一条消息：\n${JSON.stringify(result.messages.at(-1))}`
+      : result.text;
+  }
+
+  try {
+    if (prompt === '') {
+      await runRepl({ input: process.stdin, output: process.stdout, runTurn });
+    } else {
+      process.stdout.write(`${await runTurn(prompt)}\n`);
+    }
   } catch (error) {
     logger.error('运行失败', {
       message: error instanceof Error ? error.message : String(error),
