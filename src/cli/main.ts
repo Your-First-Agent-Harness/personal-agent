@@ -1,9 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
 import { loadConfig } from '../adapters/config.ts';
-import { createOpenAICompatibleProvider, ModelError } from '../adapters/model/openai-compatible.ts';
+import {
+  createOpenAICompatibleProvider,
+  ModelError,
+} from '../adapters/model/openai-compatible.ts';
 import type { Message } from '../core/message.ts';
 import { createLogger } from '../observability/logger.ts';
+import { runAgentLoop } from '../runtime/loop.ts';
+import { createBuiltinTools } from '../tools/fs.ts';
+import { ToolRegistry } from '../tools/registry.ts';
 
 const config = loadConfig();
 const logger = createLogger({ level: config.log.level }).child({ traceId: randomUUID() });
@@ -32,22 +38,47 @@ if (prompt === '') {
     model: config.model.name,
   });
 
+  const registry = new ToolRegistry();
+  for (const tool of createBuiltinTools()) {
+    registry.register(tool);
+  }
+
   const messages: Message[] = [
-    { role: 'system', content: '你是一个从零实现的 Agent Harness，回答尽量简洁。' },
+    {
+      role: 'system',
+      content: [
+        '你是一个从零实现的 Agent Harness，回答尽量简洁。',
+        '需要读文件或看目录时，优先调用工具，不要凭记忆编造文件内容。',
+      ].join('\n'),
+    },
     { role: 'user', content: prompt },
   ];
 
   const startedAt = Date.now();
   try {
-    const result = await provider.chat({ messages, maxTokens: config.agent.maxTokensPerTurn });
-    process.stdout.write(`${result.text}\n`);
-    logger.info('模型回复完成', {
-      model: result.model,
+    const result = await runAgentLoop({
+      provider,
+      registry,
+      messages,
+      maxTurns: config.agent.maxTurns,
+      maxTokens: config.agent.maxTokensPerTurn,
+      workspaceRoot: config.workspace.root,
+      logger,
+    });
+
+    process.stdout.write(
+      result.stopReason === 'max_turns'
+        ? `已达到最大轮次 ${config.agent.maxTurns}，任务未收敛。最后一条消息：\n${JSON.stringify(result.messages.at(-1))}\n`
+        : `${result.text}\n`,
+    );
+    logger.info('运行结束', {
+      stopReason: result.stopReason,
+      turns: result.turns,
       latencyMs: Date.now() - startedAt,
-      usage: result.usage ?? null,
+      usage: result.usage,
     });
   } catch (error) {
-    logger.error('模型调用失败', {
+    logger.error('运行失败', {
       message: error instanceof Error ? error.message : String(error),
       status: error instanceof ModelError ? (error.status ?? null) : null,
       latencyMs: Date.now() - startedAt,

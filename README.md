@@ -1,90 +1,81 @@
-# D004 · 接上第一个模型 Provider：让终端开口
+# D005 · 工具调用循环：让模型读懂工作区
 
-> 本文件是 D004 分支的教学内容说明。分支索引见 [main](../../tree/main)。
+> 本文件是 D005 分支的教学内容说明。分支索引见 [main](../../tree/main)。
 
 ## 今天要做出的东西
 
-- 领域消息类型：`system / user / assistant` 三种角色，只有数据没有行为
-- `ModelProvider` 接口：上层只认接口，不认厂商
-- OpenAI-compatible 实现：用原生 `fetch` 发一次 `/chat/completions`
-- CLI 接收问题并打印模型回复，失败时退出码非零
-- 错误显式建模：HTTP 状态、非法 JSON、缺字段、网络异常、超时
+- `Tool` 契约：把名称、参数 Schema 和执行函数放在同一个对象里
+- `ToolRegistry`：注册工具、向模型暴露 Schema、解析参数并执行
+- 两个内建工具：`read_file` 和 `list_dir`
+- OpenAI-compatible 工具协议：下发 `tools`，解析 `tool_calls`，回传 `tool` 消息
+- `runAgentLoop`：模型 → 工具 → 模型，直到回答完成或触发 `maxTurns`
+- 工作区路径保护：文件工具不能通过 `../../` 越出项目目录
 
 ## 今天讲什么
 
-### 1. 为什么先接 OpenAI-compatible
+### 1. Agent Loop 到底循环什么
 
-协议比厂商稳定。绝大多数模型服务都兼容 `POST /chat/completions`，先按这套协议实现，换模型只需要改 `baseUrl` 和 `model`，代码一行不动。
-
-`provider` 字段目前只接受 `openai-compatible`。不支持的值直接报错退出，而不是静默走默认实现——**配置拼错时必须发出声音**。
-
-### 2. Provider 是接口，不是 SDK
+一次模型调用只能得到一段响应。模型要求调用工具时，这轮工作还没有结束：Harness 必须执行工具，再把结果作为新消息喂回模型。
 
 ```text
-runtime → ModelProvider（接口） → openai-compatible（实现） → HTTP
+user
+  ↓
+model ── 不需要工具 ──→ 最终回答
+  ↓ 需要工具
+assistant(tool_calls)
+  ↓
+ToolRegistry.execute
+  ↓
+tool(result)
+  ↓
+model（携带完整历史再次调用）
 ```
 
-上层拿到的只有三样东西：回复文本、实际模型名、token 用量。至于底层是手写 HTTP 还是官方 SDK，上层不关心。
+停止条件只有两个：模型不再发起工具调用，或者达到 `maxTurns`。后者是保险丝，防止模型反复调用工具导致无限消耗。
 
-这和 ADR-000 不冲突：ADR 说的是"协议层可以用官方 SDK"，而今天先用原生 `fetch` 把请求的每个字段摊开讲清楚，同时保持零运行时依赖。等需要流式、重试、批量时，替换 Provider 内部实现即可。
+### 2. 工具的说明书和执行逻辑不分开
 
-### 3. 一次调用真正经过的步骤
+`Tool` 同时包含 `name`、`description`、`parameters` 和 `execute`。模型看到的参数说明与真实执行逻辑因此住在同一个对象里，不会出现“Schema 改了，执行代码忘了改”的两处漂移。
 
-| 步骤 | 做什么 | 失败时 |
-|---|---|---|
-| 组装 | `messages` + `max_tokens` + 模型名 | 参数错误在调用前就该暴露 |
-| 鉴权 | `Authorization: Bearer <key>` | 401 / 403，带状态码抛出 |
-| 请求 | 60 秒超时，超时即中止 | 网络异常收敛成 `ModelError` |
-| 解析 | 读 `choices[0].message.content` | 非法 JSON、缺字段都报错 |
-| 记账 | 读 `usage.prompt_tokens / completion_tokens` | 没有就不编造 |
+`ToolRegistry.list()` 只输出 Schema，不把 `execute` 暴露给 Provider；`ToolRegistry.execute()` 才负责真正的函数调用。
 
-响应解析不允许 `undefined` 继续往下流。缺 `choices`、缺 `message`、`content` 不是字符串，全部当场转成 `ModelError`——这正是"安静地做错事"最容易发生的地方。
+### 3. 工具失败不是 Loop 失败
 
-### 4. 密钥只从环境变量来
+未知工具、非法 JSON 参数、文件不存在、路径越狱，都不应该直接终止整个 Agent。
 
-配置文件适合团队共享，密钥不适合。`PA_MODEL_API_KEY` 只从环境变量读取，不写进 `agent.config.json`，也不进仓库。
+注册表把执行异常转换为 `isError: true` 的 `ToolResult`，Loop 再把它写成 `tool` 消息。模型能看到失败原因，下一轮可以修正路径、更换工具或向用户解释。
 
-优先级仍然是三层：默认值 → `agent.config.json` → 环境变量。`PA_MODEL_BASE_URL`、`PA_MODEL_NAME`、`PA_MAX_TOKENS` 同理。
+### 4. 消息协议必须首尾对应
 
-### 5. CLI 只做三件事
+模型返回的每次工具调用都有 `id`。 assistant 消息保存 `toolCalls`，对应的工具结果保存 `toolCallId`；Provider 再把它们转换成 OpenAI 线格式里的 `tool_calls` 和 `tool_call_id`。
 
-解析参数、调用 Provider、渲染结果。它不拼 prompt 策略，也不处理重试——那些属于 runtime，明天开始长出来。
+纯工具调用轮次里，`content: null` 是合法响应，不能当成协议错误。只有文本和工具调用同时缺失时才拒绝响应。
+
+### 5. 文件工具先解决安全边界
+
+`read_file` 和 `list_dir` 都只接受工作区内的路径。代码先把路径解析成绝对路径，再检查它是否仍以工作区根目录为前缀，阻止 `../../etc/hosts` 这类越狱。
+
+`read_file` 最多返回 8000 字符，避免一次工具结果撑爆上下文；`list_dir` 默认排除 `.git` 和 `node_modules`。同一轮的多个工具调用目前按模型给出的顺序串行执行，并行调度留到后面单独处理。
 
 ## 怎么验证这一天
 
 ```bash
-git checkout D004
+git checkout D005
 npm install
-# 方式一：直接 export
-export PA_MODEL_API_KEY=sk-...
-export PA_MODEL_BASE_URL=https://api.openai.com/v1
-export PA_MODEL_NAME=gpt-4o-mini
-# 方式二：写进项目根目录的 .env，npm run dev 会自动加载（该文件已在 .gitignore 中）
-npm run dev -- "用一句话解释什么是 Agent Harness"
+# 在 .env 中配置 PA_MODEL_API_KEY、PA_MODEL_BASE_URL、PA_MODEL_NAME
+npm run dev -- "读取 package.json，告诉我项目名称和版本"
 ```
 
-实际输出（第一行是启动日志，第二行是模型回复，第三行是调用记账）：
-
-```text
-{"time":"...","level":"info","message":"personal-agent 启动","traceId":"...","provider":"openai-compatible","model":"gpt-4o-mini","workspace":".","maxTurns":20}
-Agent Harness 是把模型、工具、上下文和观测组装成可执行循环的那层骨架。
-{"time":"...","level":"info","message":"模型回复完成","traceId":"...","model":"gpt-4o-mini","latencyMs":812,"usage":{"inputTokens":38,"outputTokens":24}}
-```
-
-失败也要能看见：
-
-```bash
-node src/cli/main.ts                 # 缺少输入，退出码 1
-node src/cli/main.ts "你好"           # 没有 PA_MODEL_API_KEY，退出码 1
-PA_MODEL_BASE_URL=https://example.com/v1 npm run dev -- "你好"   # HTTP 404，退出码 1
-```
+日志应依次出现 `loop.turn.start`、`tool.call`、`tool.result`，随后再次调用模型并以 `loop.completed` 结束。最后的运行摘要会给出累计轮次和 token 用量。
 
 自动化校验：
 
 ```bash
-npm run check   # lint + typecheck + 16 个测试
+npm run check   # lint + typecheck + 31 个测试
 ```
 
-## 明天
+测试覆盖工具协议线格式、工具结果回喂、多工具串行、未知工具、非法参数、路径越狱、内容截断与 `maxTurns` 终止。
 
-D005：把一次问答变成多轮会话——消息从哪里来、按什么顺序回放，以及 Loop 的第一版长什么样。
+## 下一步
+
+把 Loop 的运行过程整理成统一事件模型，让日志、回放和后续 UI 共用同一份事实来源。

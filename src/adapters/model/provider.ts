@@ -1,8 +1,11 @@
-import type { Message } from '../../core/message.ts';
+import type { Message, ToolCall } from '../../core/message.ts';
+import type { ToolSchema } from '../../core/tool.ts';
 
 export interface ChatRequest {
   readonly messages: readonly Message[];
   readonly maxTokens: number;
+  /** 空数组与不传等价：都不下发 tools 字段 */
+  readonly tools?: readonly ToolSchema[];
 }
 
 export interface TokenUsage {
@@ -11,8 +14,10 @@ export interface TokenUsage {
 }
 
 export interface ChatResult {
+  /** 纯工具调用轮次里 content 可能为空串，这是合法的 */
   readonly text: string;
   readonly model: string;
+  readonly toolCalls?: readonly ToolCall[];
   readonly usage?: TokenUsage;
 }
 
