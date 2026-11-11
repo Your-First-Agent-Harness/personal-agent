@@ -1,66 +1,84 @@
-# D006 · 统一事件模型：让运行过程可观测
+# D007 · 内存 Session 与五轮 REPL：让对话跨轮连续
 
-> 本文件是 D006 分支的教学内容说明。分支索引见 [main](../../tree/main)。
+> 本文件是 D007 分支的教学内容说明。分支索引见 [main](../../tree/main)。
 
 ## 今天要做出的东西
 
-- `AgentEvent` 判别联合：用五种事件描述 Loop 中发生的事实
-- 同步 `EventSink`：Runtime 只发事件，不依赖具体日志实现
-- Logger 适配器：把事件摘要映射为现有 JSON 日志，CLI 不重复打印同一事实
-- 确定性测试：覆盖无工具、单工具、多工具、工具错误和 `maxTurns` 的事件顺序
+- 进程内 `Session`：保存稳定 `id` 和完整消息历史，构造、追加与读取时都做防御性复制
+- 跨轮写回协议：每轮只把 Loop 新增的 assistant/tool 消息追加到 Session，下一轮带上完整历史
+- 可测试的 readline REPL：忽略空行，逐行执行问题，输入 `/exit` 退出
+- CLI 组合：带参数时仍是一次性提问，不带参数时在同一个 Session 上连续对话
 
 ## 今天讲什么
 
-### 1. 为什么统一事件
+### 1. Loop 管一次运行，Session 管跨轮历史
 
-D005 的 Loop 直接调用 Logger，执行编排和观测格式耦合在一起。D006 让 Loop 只描述“发生了什么”，由接入层决定如何展示。日志、后续 UI 或其他观测器因此可以消费同一份事实，而不必进入 Runtime 修改分支逻辑。
+`runAgentLoop` 的职责没有改变：接收一组消息，运行到完成或达到最大轮次，返回包含新增 assistant/tool 消息的完整数组。D007 把“上一次运行说过什么”交给 Session，而不是让 Loop 持有全局状态。
 
-### 2. 五种事件与必要摘要
+每轮固定执行下面四步：
 
-| 事件 | 含义 | 摘要字段 |
-|---|---|---|
-| `turn_started` | 一轮模型调用开始 | `turn`、`messageCount` |
-| `assistant_responded` | assistant 响应已写入历史 | `turn`、`textChars`、`toolCallCount` |
-| `tool_call_started` | 一个工具调用即将执行 | `turn`、`toolCallId`、`toolName` |
-| `tool_call_finished` | 工具已返回成功或错误结果 | `turn`、`toolCallId`、`toolName`、`isError`、`contentChars` |
-| `run_completed` | 本次 Loop 正常完成或达到最大轮次 | `turn`、`stopReason` |
+```ts
+session.append([{ role: 'user', content: input }]);
+const before = session.snapshot();
+const result = await runAgentLoop({ ...options, messages: before });
+session.append(result.messages.slice(before.length));
+```
 
-`AgentStopReason` 今天只有 `completed` 和 `max_turns`。工具事件不包含参数正文，结果只保留错误标记和字符数，避免把密钥或敏感内容带入观测层。
+`before.length` 是本轮开始前的历史长度。Loop 返回值的前半部分与快照对应，因此只追加切片中的新增消息，既不会重复旧消息，也不会漏掉工具调用及工具结果。下一次运行再从新的完整快照开始，模型就能看到此前所有轮次。
 
-无工具路径的顺序是 `turn_started → assistant_responded → run_completed`。有工具时，每次调用都在响应事件之后按 `tool_call_started → tool_call_finished` 成对出现；同一轮多个工具保持串行顺序。工具错误也会发出结果事件，并继续按 D005 的约定回喂给模型。达到 `maxTurns` 时，最后一个事件仍是 `run_completed`，但其 `stopReason` 为 `max_turns`。
+自动化测试让脚本化 Provider 依次返回“回答 1”到“回答 5”。五次请求的消息数依次为 1、3、5、7、9；第五轮请求包含前四轮 user/assistant 和第五个 user，最终 Session 恰好有 5 条 user 与 5 条 assistant。
 
-### 3. EventSink 是同步且可选的
+### 2. 快照必须隔离外部修改
 
-`EventSink.emit(event)` 返回 `void`。Loop 在原有执行点同步调用它，不建立队列，也不引入异步调度。`runAgentLoop` 接收可选的 `eventSink`；不传 sink 时，消息历史、工具回喂、累计用量和终止行为都保持不变。
+TypeScript 的 `readonly` 只是编译期约束，外部仍可以通过类型断言修改数组。Session 因此在构造、追加和 `snapshot()` 时复制消息数组、消息对象以及嵌套的 `toolCalls`。测试会故意对快照执行 `push`，确认内部历史不变；两个 Session 分别追加消息后也互不可见。
 
-### 4. Logger 只是事件的一种消费者
+这份复制只针对现有 `Message` 数据结构，不是通用深拷贝工具。稳定 `id` 用于标识当前进程中的会话，但今天不会把它写入数据库或文件。
 
-`createLoggerEventSink(logger)` 把五种事件映射为现有 JSON 日志。assistant 响应使用 `debug`，`completed` 使用 `info`，`max_turns` 使用 `warn`。CLI 只通过这个适配器观测 Loop，不再同时传入 Logger，因此同一事实不会打印两次；最后的运行摘要仍由 CLI 自己输出。
+### 3. REPL 只负责逐行交互
+
+`runRepl` 接收可注入的 `input`、`output` 和 `runTurn`，内部使用 `node:readline/promises`。每行先 `trim`：
+
+- `/exit`：结束循环；
+- 空串：不调用模型，直接读下一行；
+- 其他输入：等待 `runTurn(prompt)`，把返回答案写入输出。
+
+无论正常退出还是抛出错误，`finally` 都会关闭 readline 接口。输入输出与执行函数都可替换，所以测试使用内存流和固定答案，不需要真实终端或真实模型。
+
+### 4. 一次性提问与 REPL 共用一条数据路径
+
+CLI 启动时创建一个带 system 消息的 Session。带参数时只调用一次 `runTurn`，保留 D006 的输出、事件日志、Provider 与密钥检查；不带参数时把同一个 `runTurn` 交给 REPL。两条路径都遵循“追加 user → 保存快照 → 运行 Loop → 追加新增消息”的协议，D006 的事件契约不变。
 
 ## 怎么复现这一天
 
 ```bash
-git checkout D006
+git checkout D007
 npm install
 
-# 五种执行路径与 Logger 适配，共 7 个测试
-npx vitest run test/events.test.ts
+# 五轮完整历史、防御性快照、Session 隔离，共 3 个测试
+npx vitest run test/session.test.ts
 
-# 不传 eventSink 的 D005 行为保持不变
-npx vitest run test/loop.test.ts
+# 单轮、多轮与空行、首行退出，共 3 个测试
+npx vitest run test/repl.test.ts
 
-# 完整校验：lint + typecheck + 38 个测试
+# D006 事件契约与原有 Loop 行为回归
+npx vitest run test/events.test.ts test/loop.test.ts
+
+# 完整校验：lint + typecheck + 8 个测试文件、44 个测试
 npm run check
 ```
 
-配置好模型环境变量后，也可以观察真实 CLI 日志：
+需要使用真实模型时，按现有 `.env.example` 配置你自己的环境，不要把真实 `.env` 提交到 Git。随后可复现两种 CLI 形态：
 
 ```bash
-npm run dev -- "读取 package.json，告诉我项目名称和版本"
+# 一次性提问：只运行一轮任务
+npm run dev -- "用一句话介绍这个项目"
+
+# 多轮 REPL：在同一进程里连续提问，最后退出
+npm run dev
 ```
 
-日志会依次出现 `loop.turn.start`、`tool.call`、`tool.result`，最后根据停止原因出现 `loop.completed` 或 `loop.max_turns`。
+REPL 中可依次输入 `第一轮`、空行、`第二轮`、`/exit`，观察空行不产生模型调用，退出后不再处理后续输入。真实模型的回答不作为测试断言；五轮记忆由脚本化 Provider 确定性验证。
 
 ## 今天的边界
 
-事件是即时的运行事实，**不做持久化，也不提供 Replay**。本日没有事件存储、断点恢复、异步事件总线或流式响应；它们不属于这个统一事件契约的隐含能力。
+Session 只存在于当前进程，**进程退出即丢失**。本日不做磁盘持久化、跨进程恢复、数据库、Replay 或并发锁。历史会完整保留，尚未做字符或 token 预算、裁剪、摘要压缩与长期记忆；REPL 也只是逐行交互，不提供流式响应。
