@@ -1,69 +1,88 @@
-# D003 · 脚手架：先让机器能判对错，再谈功能
+# D004 · 接上第一个模型 Provider：让终端开口
 
-> 本文件是 D003 分支的教学内容说明。分支索引见 [main](../../tree/main)。
+> 本文件是 D004 分支的教学内容说明。分支索引见 [main](../../tree/main)。
 
 ## 今天要做出的东西
 
-- TypeScript + Node 24 工程骨架，零运行时框架依赖
-- 配置加载：默认值 → 配置文件 → 环境变量，三层覆盖
-- 日志规范：结构化、分级、带 traceId，禁止裸 `console.log`
-- CI 三段流水线：lint → typecheck → test，红灯不许合并
+- 领域消息类型：`system / user / assistant` 三种角色，只有数据没有行为
+- `ModelProvider` 接口：上层只认接口，不认厂商
+- OpenAI-compatible 实现：用原生 `fetch` 发一次 `/chat/completions`
+- CLI 接收问题并打印模型回复，失败时退出码非零
+- 错误显式建模：HTTP 状态、非法 JSON、缺字段、网络异常、超时
 
 ## 今天讲什么
 
-### 1. 为什么第三天就上 CI
+### 1. 为什么先接 OpenAI-compatible
 
-功能还没写就先搭流水线，看起来反直觉。但 Harness 这类系统的 bug 有一个共性：**它不是报错，而是安静地做错事**——参数被静默丢弃、上下文被悄悄截断、工具结果少了一个字段。
+协议比厂商稳定。绝大多数模型服务都兼容 `POST /chat/completions`，先按这套协议实现，换模型只需要改 `baseUrl` 和 `model`，代码一行不动。
 
-没有自动化校验，这类问题只能等演示时炸。CI 的作用不是"保证代码对"，而是**让错误尽早发出声音**。
+`provider` 字段目前只接受 `openai-compatible`。不支持的值直接报错退出，而不是静默走默认实现——**配置拼错时必须发出声音**。
 
-### 2. 配置三层覆盖
+### 2. Provider 是接口，不是 SDK
 
 ```text
-默认值  <  配置文件  <  环境变量
+runtime → ModelProvider（接口） → openai-compatible（实现） → HTTP
 ```
 
-优先级这样定的原因：默认值保证开箱能跑，配置文件适合团队共享，环境变量留给密钥和临时覆盖。密钥永远不进仓库，只从环境变量读。
+上层拿到的只有三样东西：回复文本、实际模型名、token 用量。至于底层是手写 HTTP 还是官方 SDK，上层不关心。
 
-配置用类型定义，不用 `Record<string, unknown>`：配置项是接口契约的一部分，拼错一个键名就该在编译期报错。
+这和 ADR-000 不冲突：ADR 说的是"协议层可以用官方 SDK"，而今天先用原生 `fetch` 把请求的每个字段摊开讲清楚，同时保持零运行时依赖。等需要流式、重试、批量时，替换 Provider 内部实现即可。
 
-### 3. 日志是给未来的自己看的
+### 3. 一次调用真正经过的步骤
 
-三条硬规则：
-
-1. **结构化**：输出 JSON，不拼字符串，机器可查。
-2. **带上下文**：每条日志必须有 `traceId` 和当前轮次，否则 D83 做 trace 时全是孤儿。
-3. **分级明确**：`debug` 只留在本地，`info` 记录状态变化，`warn` 记录可恢复异常，`error` 记录需要人介入的失败。
-
-禁止裸 `console.log`：它是不可检索的，也是唯一无法被统一采集的输出方式。
-
-### 4. CI 三段
-
-| 阶段 | 命令 | 失败意味着 |
+| 步骤 | 做什么 | 失败时 |
 |---|---|---|
-| lint | `npm run lint` | 风格或潜在错误，必须在提交前修 |
-| typecheck | `npm run typecheck` | 契约被破坏 |
-| test | `npm run test` | 行为与预期不符 |
+| 组装 | `messages` + `max_tokens` + 模型名 | 参数错误在调用前就该暴露 |
+| 鉴权 | `Authorization: Bearer <key>` | 401 / 403，带状态码抛出 |
+| 请求 | 60 秒超时，超时即中止 | 网络异常收敛成 `ModelError` |
+| 解析 | 读 `choices[0].message.content` | 非法 JSON、缺字段都报错 |
+| 记账 | 读 `usage.prompt_tokens / completion_tokens` | 没有就不编造 |
 
-三段串行，任一失败即整体失败。**不要为了过 CI 去关规则**——规则松了，后面 97 天都会替它还债。
+响应解析不允许 `undefined` 继续往下流。缺 `choices`、缺 `message`、`content` 不是字符串，全部当场转成 `ModelError`——这正是"安静地做错事"最容易发生的地方。
+
+### 4. 密钥只从环境变量来
+
+配置文件适合团队共享，密钥不适合。`PA_MODEL_API_KEY` 只从环境变量读取，不写进 `agent.config.json`，也不进仓库。
+
+优先级仍然是三层：默认值 → `agent.config.json` → 环境变量。`PA_MODEL_BASE_URL`、`PA_MODEL_NAME`、`PA_MAX_TOKENS` 同理。
+
+### 5. CLI 只做三件事
+
+解析参数、调用 Provider、渲染结果。它不拼 prompt 策略，也不处理重试——那些属于 runtime，明天开始长出来。
 
 ## 怎么验证这一天
 
 ```bash
-git checkout D003
+git checkout D004
 npm install
-npm run check      # lint + typecheck + test 一次跑完
-npm run dev        # 输出一行带 traceId 的 JSON 日志
+export PA_MODEL_API_KEY=sk-...
+export PA_MODEL_BASE_URL=https://api.openai.com/v1
+export PA_MODEL_NAME=gpt-4o-mini
+npm run dev -- "用一句话解释什么是 Agent Harness"
 ```
 
-`npm run dev` 的实际输出（配置全部取默认值）：
+实际输出（第一行是启动日志，第二行是模型回复，第三行是调用记账）：
 
-```json
-{"time":"...","level":"info","message":"personal-agent 启动","traceId":"...","model":"default","provider":"openai-compatible","workspace":".","maxTurns":20}
+```text
+{"time":"...","level":"info","message":"personal-agent 启动","traceId":"...","provider":"openai-compatible","model":"gpt-4o-mini","workspace":".","maxTurns":20}
+Agent Harness 是把模型、工具、上下文和观测组装成可执行循环的那层骨架。
+{"time":"...","level":"info","message":"模型回复完成","traceId":"...","model":"gpt-4o-mini","latencyMs":812,"usage":{"inputTokens":38,"outputTokens":24}}
 ```
 
-加 `PA_LOG_LEVEL=debug npm run dev` 会多出一行 `debug`，这就是三层覆盖在起作用。
+失败也要能看见：
+
+```bash
+node src/cli/main.ts                 # 缺少输入，退出码 1
+node src/cli/main.ts "你好"           # 没有 PA_MODEL_API_KEY，退出码 1
+PA_MODEL_BASE_URL=https://example.com/v1 npm run dev -- "你好"   # HTTP 404，退出码 1
+```
+
+自动化校验：
+
+```bash
+npm run check   # lint + typecheck + 16 个测试
+```
 
 ## 明天
 
-D004：接上第一个模型 Provider，让终端里第一次出现模型的回复。
+D005：把一次问答变成多轮会话——消息从哪里来、按什么顺序回放，以及 Loop 的第一版长什么样。
