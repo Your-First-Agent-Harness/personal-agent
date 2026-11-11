@@ -1,0 +1,26 @@
+{
+  "name": "personal-agent",
+  "version": "0.1.0-dev",
+  "private": true,
+  "type": "module",
+  "description": "A from-scratch Agent Harness: pluggable tools, MCP, context engineering, observability, evals.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node src/cli/main.ts",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run lint && npm run typecheck && npm run test"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.6",
+    "eslint": "^10.14.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.72.2",
+    "vitest": "^5.1.0"
+  }
+}
