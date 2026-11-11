@@ -135,4 +135,85 @@ describe('createOpenAICompatibleProvider', () => {
 
     await expect(provider.chat(request)).rejects.toThrow('ECONNREFUSED');
   });
+
+  it('下发 tools，并把 content 为 null 的工具调用解析出来', async () => {
+    const calls: Call[] = [];
+    const provider = providerWith(
+      jsonResponse({
+        model: 'test-model',
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call_1',
+                  type: 'function',
+                  function: { name: 'read_file', arguments: '{"path":"README.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      calls,
+    );
+
+    const result = await provider.chat({
+      ...request,
+      tools: [
+        {
+          name: 'read_file',
+          description: '读文件',
+          parameters: { type: 'object', properties: {} },
+        },
+      ],
+    });
+
+    expect(result.text).toBe('');
+    expect(result.toolCalls).toEqual([
+      { id: 'call_1', name: 'read_file', arguments: '{"path":"README.md"}' },
+    ]);
+
+    const body = JSON.parse(calls[0]?.init.body as string) as Record<string, unknown>;
+    expect(body['tools']).toEqual([
+      {
+        type: 'function',
+        function: {
+          name: 'read_file',
+          description: '读文件',
+          parameters: { type: 'object', properties: {} },
+        },
+      },
+    ]);
+  });
+
+  it('assistant 的 tool_calls 与 tool 消息按线格式回传', async () => {
+    const calls: Call[] = [];
+    const provider = providerWith(jsonResponse({ choices: [{ message: { content: 'done' } }] }), calls);
+
+    await provider.chat({
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call_1', name: 'read_file', arguments: '{}' }],
+        },
+        { role: 'tool', toolCallId: 'call_1', name: 'read_file', content: '文件内容' },
+      ],
+      maxTokens: 64,
+    });
+
+    const body = JSON.parse(calls[0]?.init.body as string) as Record<string, unknown>;
+    expect(body['messages']).toEqual([
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', content: '文件内容', tool_call_id: 'call_1', name: 'read_file' },
+    ]);
+  });
 });
