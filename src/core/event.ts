@@ -1,4 +1,4 @@
-export type AgentStopReason = 'completed' | 'max_turns' | 'cancelled';
+export type AgentStopReason = 'completed' | 'max_turns' | 'cancelled' | 'tool_errors';
 
 export type AgentEvent =
   | { readonly type: 'turn_started'; readonly turn: number; readonly messageCount: number }

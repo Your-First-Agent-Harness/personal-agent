@@ -132,7 +132,7 @@ describe('edit_file', () => {
     );
 
     expect(result.isError).toBe(true);
-    expect(result.content).toBe('没有找到唯一匹配：0 处，请读取文件后提供更长 oldText');
+    expect(result.content).toBe('没有找到唯一匹配：0 处\n提示：请读取文件后提供更长 oldText');
     expect(readFileSync(join(root, 'a.txt'), 'utf8')).toBe('actual\n');
   });
 
@@ -170,12 +170,13 @@ describe('edit_file', () => {
     const outside = resolve(root, '../../outside.txt');
     writeFileSync(outside, 'outside\n');
 
-    await expect(
-      editFileTool.execute(
-        { path: '../../outside.txt', oldText: 42, newText: 'changed' },
-        { workspaceRoot: root },
-      ),
-    ).rejects.toThrow('oldText 必须是字符串');
+    const result = await editFileTool.execute(
+      { path: '../../outside.txt', oldText: 42, newText: 'changed' },
+      { workspaceRoot: root },
+    );
+
+    expect(result.content).toContain('oldText 必须是字符串');
+    expect(result.error?.code).toBe('INVALID_ARGUMENTS');
     expect(readFileSync(outside, 'utf8')).toBe('outside\n');
   });
 
@@ -183,12 +184,13 @@ describe('edit_file', () => {
     const root = workspace();
     writeFileSync(join(root, 'a.txt'), 'old\n');
 
-    await expect(
-      editFileTool.execute(
-        { path: 'a.txt', oldText: 'old', newText: 42 },
-        { workspaceRoot: root },
-      ),
-    ).rejects.toThrow('newText 必须是字符串');
+    const result = await editFileTool.execute(
+      { path: 'a.txt', oldText: 'old', newText: 42 },
+      { workspaceRoot: root },
+    );
+
+    expect(result.content).toContain('newText 必须是字符串');
+    expect(result.error?.code).toBe('INVALID_ARGUMENTS');
     expect(readFileSync(join(root, 'a.txt'), 'utf8')).toBe('old\n');
   });
 

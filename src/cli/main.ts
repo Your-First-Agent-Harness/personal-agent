@@ -67,6 +67,7 @@ if (config.model.provider !== 'openai-compatible') {
       maxTurns: config.agent.maxTurns,
       maxTokens: config.agent.maxTokensPerTurn,
       maxContextChars: config.agent.maxContextChars,
+      maxConsecutiveToolErrors: config.agent.maxConsecutiveToolErrors,
       workspaceRoot: config.workspace.root,
       eventSink: createLoggerEventSink(logger),
       signal: controller.signal,
@@ -81,6 +82,9 @@ if (config.model.provider !== 'openai-compatible') {
     });
     if (result.stopReason === 'cancelled') {
       return '任务已取消。';
+    }
+    if (result.stopReason === 'tool_errors') {
+      return '连续工具错误达到上限，任务未收敛，请检查最后的工具错误。';
     }
     return result.stopReason === 'max_turns'
       ? `已达到最大轮次 ${config.agent.maxTurns}，任务未收敛。最后一条消息：\n${JSON.stringify(result.messages.at(-1))}`

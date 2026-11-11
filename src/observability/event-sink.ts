@@ -38,7 +38,9 @@ export function createLoggerEventSink(logger: Logger): EventSink {
           logger.info('loop.cancelled', { turn: event.turn });
           break;
         case 'run_completed':
-          if (event.stopReason === 'max_turns') {
+          if (event.stopReason === 'tool_errors') {
+            logger.warn('loop.tool_errors', { turn: event.turn });
+          } else if (event.stopReason === 'max_turns') {
             logger.warn('loop.max_turns', { turn: event.turn });
           } else {
             logger.info('loop.completed', { turn: event.turn });

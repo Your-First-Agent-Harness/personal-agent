@@ -12,6 +12,7 @@ export interface AgentLoopOptions {
   readonly maxTurns: number;
   readonly maxTokens: number;
   readonly maxContextChars?: number;
+  readonly maxConsecutiveToolErrors?: number;
   readonly workspaceRoot: string;
   readonly eventSink?: EventSink;
   readonly signal?: AbortSignal;
@@ -40,6 +41,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   const messages: Message[] = [...options.messages];
   const tools = options.registry.list();
   const usage = { inputTokens: 0, outputTokens: 0 };
+  const maxConsecutiveToolErrors = options.maxConsecutiveToolErrors ?? 3;
+  let consecutiveToolErrors = 0;
   const cancelled = (turn: number): AgentLoopResult => {
     options.eventSink?.emit({ type: 'run_cancelled', turn });
     return { messages, text: '', turns: turn, stopReason: 'cancelled', usage };
@@ -124,6 +127,11 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         name: call.name,
         content: toolResult.content,
       });
+      consecutiveToolErrors = toolResult.isError === true ? consecutiveToolErrors + 1 : 0;
+      if (consecutiveToolErrors >= maxConsecutiveToolErrors) {
+        options.eventSink?.emit({ type: 'run_completed', turn, stopReason: 'tool_errors' });
+        return { messages, text: '', turns: turn, stopReason: 'tool_errors', usage };
+      }
     }
   }
 

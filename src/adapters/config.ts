@@ -16,6 +16,7 @@ export interface AppConfig {
     readonly maxTurns: number;
     readonly maxTokensPerTurn: number;
     readonly maxContextChars: number;
+    readonly maxConsecutiveToolErrors: number;
   };
   readonly workspace: { readonly root: string };
 }
@@ -30,7 +31,12 @@ export class ConfigError extends Error {
 const DEFAULTS: AppConfig = {
   log: { level: 'info' },
   model: { provider: 'openai-compatible', name: 'default', baseUrl: 'https://api.openai.com/v1' },
-  agent: { maxTurns: 20, maxTokensPerTurn: 4096, maxContextChars: 24_000 },
+  agent: {
+    maxTurns: 20,
+    maxTokensPerTurn: 4096,
+    maxContextChars: 24_000,
+    maxConsecutiveToolErrors: 3,
+  },
   workspace: { root: '.' },
 };
 
@@ -66,6 +72,10 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
         fromEnv.agent.maxContextChars ??
         fromFile.agent.maxContextChars ??
         DEFAULTS.agent.maxContextChars,
+      maxConsecutiveToolErrors:
+        fromEnv.agent.maxConsecutiveToolErrors ??
+        fromFile.agent.maxConsecutiveToolErrors ??
+        DEFAULTS.agent.maxConsecutiveToolErrors,
     },
     workspace: { root: fromEnv.workspace.root ?? fromFile.workspace.root ?? DEFAULTS.workspace.root },
   };
@@ -74,7 +84,12 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 interface PartialConfig {
   log: { level?: LogLevel };
   model: { provider?: string; name?: string; apiKey?: string; baseUrl?: string };
-  agent: { maxTurns?: number; maxTokensPerTurn?: number; maxContextChars?: number };
+  agent: {
+    maxTurns?: number;
+    maxTokensPerTurn?: number;
+    maxContextChars?: number;
+    maxConsecutiveToolErrors?: number;
+  };
   workspace: { root?: string };
 }
 
@@ -120,6 +135,10 @@ function readConfigFile(path: string): PartialConfig {
         pick(source, 'agent', 'maxContextChars'),
         'agent.maxContextChars',
       ),
+      maxConsecutiveToolErrors: parsePositiveInt(
+        pick(source, 'agent', 'maxConsecutiveToolErrors'),
+        'agent.maxConsecutiveToolErrors',
+      ),
     },
     workspace: { root: parseString(pick(source, 'workspace', 'root'), 'workspace.root') },
   };
@@ -138,6 +157,10 @@ function readEnv(env: NodeJS.ProcessEnv): PartialConfig {
       maxTurns: parsePositiveInt(env['PA_MAX_TURNS'], 'PA_MAX_TURNS'),
       maxTokensPerTurn: parsePositiveInt(env['PA_MAX_TOKENS'], 'PA_MAX_TOKENS'),
       maxContextChars: parsePositiveInt(env['PA_MAX_CONTEXT_CHARS'], 'PA_MAX_CONTEXT_CHARS'),
+      maxConsecutiveToolErrors: parsePositiveInt(
+        env['PA_MAX_CONSECUTIVE_TOOL_ERRORS'],
+        'PA_MAX_CONSECUTIVE_TOOL_ERRORS',
+      ),
     },
     workspace: { root: parseString(env['PA_WORKSPACE'], 'PA_WORKSPACE') },
   };
