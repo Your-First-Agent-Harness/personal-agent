@@ -1,75 +1,31 @@
-# D008 · 上下文字符预算与工具组安全裁剪
+# D009 · AbortSignal 与模型超时
 
 ## 今天要做出的东西
 
-- `buildContext(messages, maxChars)`：从完整历史生成单次模型请求的防御性副本，短历史原样保留，长历史按字符预算裁剪。
-- 长历史始终保留 system 与最新用户目标，并在 system 后插入 `…[更早的上下文已省略]`；system 自身超限会显式报错。
-- 最新用户消息单条超限时以 `…[已截断]` 开头并保留原消息末尾；工具组超限时只截断 tool content，不修改 assistant 的工具调用。
-- Loop 每轮只把裁剪窗口发给 Provider，返回值与 Session 仍保存完整历史。
-- `AppConfig.agent.maxContextChars` 默认 `24000`，可由 `agent.config.json` 的 `agent.maxContextChars` 或 `PA_MAX_CONTEXT_CHARS` 覆盖；优先级为默认值 < 文件 < 环境变量，值必须是正整数。
-
-## 字符预算公式
-
-本日直接按 JavaScript 字符串的 `length` 计数。单条消息的成本为：
-
-```text
-messageChars(message)
-  = message.content.length
-  + (message.toolCallId?.length ?? 0)
-  + (message.name?.length ?? 0)
-  + 每个 toolCall 的 id.length + name.length + arguments.length
-
-totalChars(messages) = 所有 messageChars 之和
-```
-
-省略标记本身也计入预算。裁剪时先保留全部 system 和省略标记，再优先选择最新用户目标，并从最近消息向前选择剩余单元；最终窗口满足 `totalChars(window) <= maxChars`。
-
-## 工具组配对示例
-
-下面的 assistant 与 tool 是一个不可拆分的单元：
-
-```ts
-[
-  {
-    role: 'assistant',
-    content: '准备读取',
-    toolCalls: [{ id: 'c1', name: 'read_file', arguments: '{"path":"a.ts"}' }],
-  },
-  {
-    role: 'tool',
-    toolCallId: 'c1',
-    name: 'read_file',
-    content: '文件内容……',
-  },
-]
-```
-
-预算足够时两条一起保留，预算不足时两条一起省略。若 assistant 与 tool 元数据能放入预算、仅工具结果过大，则只缩短 tool 的 `content` 并追加截断标记，`toolCalls` 与 `toolCallId` 仍完整配对。裁剪选择不会单独纳入没有 assistant 配对的孤立 tool。
+- `ChatRequest`、`AgentLoopOptions` 与 `ToolContext` 接收同一个可选 `AbortSignal`，取消信号穿过 Loop、Provider 和工具注册表。
+- OpenAI-compatible Provider 用 `AbortSignal.any` 组合外部信号与内部超时（默认 60 秒，可由 `timeoutMs` 覆盖）。外部取消抛出 `ModelCancelledError`；内部超时仍是带原始原因的 `ModelError`，HTTP 与协议错误语义不变。
+- Loop 在进入循环前、每轮模型调用前和每个工具执行前检查取消；等待模型时只把 `ModelCancelledError` 转为正常取消出口，其他错误继续抛出。
+- 取消结果为 `stopReason: 'cancelled'`、`text: ''`，保留已经产生的完整消息、累计 usage 和当前轮次，并在返回前发出 `run_cancelled`。Logger 将该事件记录为 `loop.cancelled`。
+- CLI 注册一次 `SIGINT`：按下 Ctrl+C 会取消当前任务并输出 `任务已取消。`；正常完成和达到最大轮次的输出保持不变。
 
 ## 怎么复现这一天
 
 ```bash
-git switch D008
+git switch D009
 npm install
 
-# 短历史、省略与截断、system 超限、工具配对、孤立 tool、完整 Session 历史
-npx vitest run test/context.test.ts
+# 预先取消、模型等待中取消、工具执行前取消、signal 传递与取消日志
+npx vitest run test/cancellation.test.ts
 
-# 默认预算、文件覆盖、环境覆盖、零值与非法值
-npx vitest run test/config.test.ts
+# 外部取消与内部超时，以及既有 HTTP/协议行为
+npx vitest run test/openai-compatible.test.ts
 
 # 完整校验：lint + typecheck + 全部自动化测试
 npm run check
 ```
 
-真实 CLI 可通过环境变量调整单次请求窗口，例如：
-
-```bash
-PA_MAX_CONTEXT_CHARS=12000 npm run dev -- "继续完成这个任务"
-```
-
-这不会改变 Session 的完整历史，只限制每轮发送给 Provider 的消息窗口。
+测试全部使用脚本化 Provider 或本地假 `fetch`，不需要真实模型或密钥。配置好既有模型环境后，也可运行 `npm run dev -- "继续完成这个任务"`，在等待期间按一次 Ctrl+C 观察取消输出。
 
 ## 今天的边界
 
-本日是**字符级近似预算，不是 tokenizer**，`length` 不等于模型 token 数；也**不做摘要压缩**，被省略的旧内容不会生成替代摘要。Session 仍是进程内完整历史，不做持久化、长期记忆或向量检索。
+本日是**协作式取消**，不是对任意同步代码的强中断。同步文件工具只能在模型调用、工具调用等操作边界响应取消，无法中途打断已经开始的同步文件读写。命令子进程的终止不在本日范围内，留到 D013 的 `run_command` 实现；本日也不引入流式响应、断点续跑或持久化恢复。

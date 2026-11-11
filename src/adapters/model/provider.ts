@@ -6,6 +6,14 @@ export interface ChatRequest {
   readonly maxTokens: number;
   /** 空数组与不传等价：都不下发 tools 字段 */
   readonly tools?: readonly ToolSchema[];
+  readonly signal?: AbortSignal;
+}
+
+export class ModelCancelledError extends Error {
+  constructor() {
+    super('模型请求已取消');
+    this.name = 'ModelCancelledError';
+  }
 }
 
 export interface TokenUsage {

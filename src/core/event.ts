@@ -1,4 +1,4 @@
-export type AgentStopReason = 'completed' | 'max_turns';
+export type AgentStopReason = 'completed' | 'max_turns' | 'cancelled';
 
 export type AgentEvent =
   | { readonly type: 'turn_started'; readonly turn: number; readonly messageCount: number }
@@ -22,7 +22,8 @@ export type AgentEvent =
       readonly isError: boolean;
       readonly contentChars: number;
     }
-  | { readonly type: 'run_completed'; readonly turn: number; readonly stopReason: AgentStopReason };
+  | { readonly type: 'run_completed'; readonly turn: number; readonly stopReason: AgentStopReason }
+  | { readonly type: 'run_cancelled'; readonly turn: number };
 
 export interface EventSink {
   emit(event: AgentEvent): void;

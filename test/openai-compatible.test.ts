@@ -216,4 +216,80 @@ describe('createOpenAICompatibleProvider', () => {
       { role: 'tool', content: '文件内容', tool_call_id: 'call_1', name: 'read_file' },
     ]);
   });
+
+  function pendingFetch(onRequest: () => void): typeof fetch {
+    return (_input, init) => {
+      onRequest();
+      return new Promise<Response>((_resolve, reject) => {
+        const signal = init?.signal;
+        const rejection = () => {
+          const reason: unknown = signal?.reason;
+          return reason instanceof Error ? reason : new Error(String(reason));
+        };
+        if (signal?.aborted) {
+          reject(rejection());
+          return;
+        }
+        signal?.addEventListener('abort', () => reject(rejection()), { once: true });
+      });
+    };
+  }
+
+  it('fetch 前已外部取消时不发请求，并抛 ModelCancelledError', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    const provider = createOpenAICompatibleProvider({
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'test-key',
+      model: 'test-model',
+      fetchImpl: pendingFetch(() => {
+        calls += 1;
+      }),
+    });
+
+    await expect(
+      provider.chat({ ...request, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'ModelCancelledError' });
+    expect(calls).toBe(0);
+  });
+
+  it('fetch 等待期间外部取消时抛 ModelCancelledError', async () => {
+    const controller = new AbortController();
+    let markFetchStarted!: () => void;
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    const provider = createOpenAICompatibleProvider({
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'test-key',
+      model: 'test-model',
+      fetchImpl: pendingFetch(markFetchStarted),
+    });
+
+    const pending = provider.chat({ ...request, signal: controller.signal });
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'ModelCancelledError' });
+    await fetchStarted;
+    controller.abort();
+    await rejection;
+  });
+
+  it('内部 AbortSignal.timeout 仍转成带原因的 ModelError', async () => {
+    const provider = createOpenAICompatibleProvider({
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'test-key',
+      model: 'test-model',
+      timeoutMs: 5,
+      fetchImpl: pendingFetch(() => undefined),
+    });
+
+    try {
+      await provider.chat(request);
+      throw new Error('预期内部超时');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ModelError);
+      expect(error).toMatchObject({ name: 'ModelError' });
+      expect((error as ModelError).cause).toBeDefined();
+    }
+  });
 });
