@@ -28,7 +28,7 @@ export class ConfigError extends Error {
 
 const DEFAULTS: AppConfig = {
   log: { level: 'info' },
-  model: { provider: 'openai-compatible', name: 'default' },
+  model: { provider: 'openai-compatible', name: 'default', baseUrl: 'https://api.openai.com/v1' },
   agent: { maxTurns: 20, maxTokensPerTurn: 4096 },
   workspace: { root: '.' },
 };
@@ -53,7 +53,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       provider: fromEnv.model.provider ?? fromFile.model.provider ?? DEFAULTS.model.provider,
       name: fromEnv.model.name ?? fromFile.model.name ?? DEFAULTS.model.name,
       apiKey: fromEnv.model.apiKey ?? fromFile.model.apiKey,
-      baseUrl: fromEnv.model.baseUrl ?? fromFile.model.baseUrl,
+      baseUrl: fromEnv.model.baseUrl ?? fromFile.model.baseUrl ?? DEFAULTS.model.baseUrl,
     },
     agent: {
       maxTurns: fromEnv.agent.maxTurns ?? fromFile.agent.maxTurns ?? DEFAULTS.agent.maxTurns,
