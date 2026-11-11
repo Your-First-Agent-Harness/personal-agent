@@ -53,7 +53,16 @@
 git checkout D003
 npm install
 npm run check      # lint + typecheck + test 一次跑完
+npm run dev        # 输出一行带 traceId 的 JSON 日志
 ```
+
+`npm run dev` 的实际输出（配置全部取默认值）：
+
+```json
+{"time":"...","level":"info","message":"personal-agent 启动","traceId":"...","model":"default","provider":"openai-compatible","workspace":".","maxTurns":20}
+```
+
+加 `PA_LOG_LEVEL=debug npm run dev` 会多出一行 `debug`，这就是三层覆盖在起作用。
 
 ## 明天
 
