@@ -15,6 +15,7 @@ export interface AppConfig {
   readonly agent: {
     readonly maxTurns: number;
     readonly maxTokensPerTurn: number;
+    readonly maxContextChars: number;
   };
   readonly workspace: { readonly root: string };
 }
@@ -29,7 +30,7 @@ export class ConfigError extends Error {
 const DEFAULTS: AppConfig = {
   log: { level: 'info' },
   model: { provider: 'openai-compatible', name: 'default', baseUrl: 'https://api.openai.com/v1' },
-  agent: { maxTurns: 20, maxTokensPerTurn: 4096 },
+  agent: { maxTurns: 20, maxTokensPerTurn: 4096, maxContextChars: 24_000 },
   workspace: { root: '.' },
 };
 
@@ -61,6 +62,10 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
         fromEnv.agent.maxTokensPerTurn ??
         fromFile.agent.maxTokensPerTurn ??
         DEFAULTS.agent.maxTokensPerTurn,
+      maxContextChars:
+        fromEnv.agent.maxContextChars ??
+        fromFile.agent.maxContextChars ??
+        DEFAULTS.agent.maxContextChars,
     },
     workspace: { root: fromEnv.workspace.root ?? fromFile.workspace.root ?? DEFAULTS.workspace.root },
   };
@@ -69,7 +74,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
 interface PartialConfig {
   log: { level?: LogLevel };
   model: { provider?: string; name?: string; apiKey?: string; baseUrl?: string };
-  agent: { maxTurns?: number; maxTokensPerTurn?: number };
+  agent: { maxTurns?: number; maxTokensPerTurn?: number; maxContextChars?: number };
   workspace: { root?: string };
 }
 
@@ -111,6 +116,10 @@ function readConfigFile(path: string): PartialConfig {
         pick(source, 'agent', 'maxTokensPerTurn'),
         'agent.maxTokensPerTurn',
       ),
+      maxContextChars: parsePositiveInt(
+        pick(source, 'agent', 'maxContextChars'),
+        'agent.maxContextChars',
+      ),
     },
     workspace: { root: parseString(pick(source, 'workspace', 'root'), 'workspace.root') },
   };
@@ -128,6 +137,7 @@ function readEnv(env: NodeJS.ProcessEnv): PartialConfig {
     agent: {
       maxTurns: parsePositiveInt(env['PA_MAX_TURNS'], 'PA_MAX_TURNS'),
       maxTokensPerTurn: parsePositiveInt(env['PA_MAX_TOKENS'], 'PA_MAX_TOKENS'),
+      maxContextChars: parsePositiveInt(env['PA_MAX_CONTEXT_CHARS'], 'PA_MAX_CONTEXT_CHARS'),
     },
     workspace: { root: parseString(env['PA_WORKSPACE'], 'PA_WORKSPACE') },
   };

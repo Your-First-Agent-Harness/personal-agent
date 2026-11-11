@@ -63,6 +63,7 @@ if (config.model.provider !== 'openai-compatible') {
       messages: before,
       maxTurns: config.agent.maxTurns,
       maxTokens: config.agent.maxTokensPerTurn,
+      maxContextChars: config.agent.maxContextChars,
       workspaceRoot: config.workspace.root,
       eventSink: createLoggerEventSink(logger),
     });
