@@ -1,6 +1,6 @@
 import type { Message } from '../core/message.ts';
+import type { AgentStopReason, EventSink } from '../core/event.ts';
 import type { ModelProvider, TokenUsage } from '../adapters/model/provider.ts';
-import type { Logger } from '../observability/logger.ts';
 import type { ToolRegistry } from '../tools/registry.ts';
 
 export interface AgentLoopOptions {
@@ -10,10 +10,10 @@ export interface AgentLoopOptions {
   readonly maxTurns: number;
   readonly maxTokens: number;
   readonly workspaceRoot: string;
-  readonly logger?: Logger;
+  readonly eventSink?: EventSink;
 }
 
-export type StopReason = 'completed' | 'max_turns';
+export type StopReason = AgentStopReason;
 
 export interface AgentLoopResult {
   /** 完整消息历史，包含每一轮 assistant 与 tool 消息，可直接落盘回放 */
@@ -38,7 +38,7 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   const usage = { inputTokens: 0, outputTokens: 0 };
 
   for (let turn = 1; turn <= options.maxTurns; turn += 1) {
-    options.logger?.info('loop.turn.start', { turn, messageCount: messages.length });
+    options.eventSink?.emit({ type: 'turn_started', turn, messageCount: messages.length });
 
     const result = await options.provider.chat({
       messages,
@@ -57,23 +57,36 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       content: result.text,
       ...(toolCalls.length > 0 ? { toolCalls } : {}),
     });
+    options.eventSink?.emit({
+      type: 'assistant_responded',
+      turn,
+      textChars: result.text.length,
+      toolCallCount: toolCalls.length,
+    });
 
     if (toolCalls.length === 0) {
-      options.logger?.info('loop.completed', { turn, usage });
+      options.eventSink?.emit({ type: 'run_completed', turn, stopReason: 'completed' });
       return { messages, text: result.text, turns: turn, stopReason: 'completed', usage };
     }
 
     // 串行执行：同一轮里的多个调用按模型给出的顺序来，并行是后面单独的一天
     for (const call of toolCalls) {
-      options.logger?.info('tool.call', { turn, tool: call.name, args: call.arguments });
+      options.eventSink?.emit({
+        type: 'tool_call_started',
+        turn,
+        toolCallId: call.id,
+        toolName: call.name,
+      });
       const toolResult = await options.registry.execute(call, {
         workspaceRoot: options.workspaceRoot,
       });
-      options.logger?.info('tool.result', {
+      options.eventSink?.emit({
+        type: 'tool_call_finished',
         turn,
-        tool: call.name,
+        toolCallId: call.id,
+        toolName: call.name,
         isError: toolResult.isError === true,
-        chars: toolResult.content.length,
+        contentChars: toolResult.content.length,
       });
       messages.push({
         role: 'tool',
@@ -84,6 +97,10 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     }
   }
 
-  options.logger?.warn('loop.max_turns', { maxTurns: options.maxTurns, usage });
+  options.eventSink?.emit({
+    type: 'run_completed',
+    turn: options.maxTurns,
+    stopReason: 'max_turns',
+  });
   return { messages, text: '', turns: options.maxTurns, stopReason: 'max_turns', usage };
 }

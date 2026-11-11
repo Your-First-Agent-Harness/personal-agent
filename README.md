@@ -1,81 +1,66 @@
-# D005 · 工具调用循环：让模型读懂工作区
+# D006 · 统一事件模型：让运行过程可观测
 
-> 本文件是 D005 分支的教学内容说明。分支索引见 [main](../../tree/main)。
+> 本文件是 D006 分支的教学内容说明。分支索引见 [main](../../tree/main)。
 
 ## 今天要做出的东西
 
-- `Tool` 契约：把名称、参数 Schema 和执行函数放在同一个对象里
-- `ToolRegistry`：注册工具、向模型暴露 Schema、解析参数并执行
-- 两个内建工具：`read_file` 和 `list_dir`
-- OpenAI-compatible 工具协议：下发 `tools`，解析 `tool_calls`，回传 `tool` 消息
-- `runAgentLoop`：模型 → 工具 → 模型，直到回答完成或触发 `maxTurns`
-- 工作区路径保护：文件工具不能通过 `../../` 越出项目目录
+- `AgentEvent` 判别联合：用五种事件描述 Loop 中发生的事实
+- 同步 `EventSink`：Runtime 只发事件，不依赖具体日志实现
+- Logger 适配器：把事件摘要映射为现有 JSON 日志，CLI 不重复打印同一事实
+- 确定性测试：覆盖无工具、单工具、多工具、工具错误和 `maxTurns` 的事件顺序
 
 ## 今天讲什么
 
-### 1. Agent Loop 到底循环什么
+### 1. 为什么统一事件
 
-一次模型调用只能得到一段响应。模型要求调用工具时，这轮工作还没有结束：Harness 必须执行工具，再把结果作为新消息喂回模型。
+D005 的 Loop 直接调用 Logger，执行编排和观测格式耦合在一起。D006 让 Loop 只描述“发生了什么”，由接入层决定如何展示。日志、后续 UI 或其他观测器因此可以消费同一份事实，而不必进入 Runtime 修改分支逻辑。
 
-```text
-user
-  ↓
-model ── 不需要工具 ──→ 最终回答
-  ↓ 需要工具
-assistant(tool_calls)
-  ↓
-ToolRegistry.execute
-  ↓
-tool(result)
-  ↓
-model（携带完整历史再次调用）
-```
+### 2. 五种事件与必要摘要
 
-停止条件只有两个：模型不再发起工具调用，或者达到 `maxTurns`。后者是保险丝，防止模型反复调用工具导致无限消耗。
+| 事件 | 含义 | 摘要字段 |
+|---|---|---|
+| `turn_started` | 一轮模型调用开始 | `turn`、`messageCount` |
+| `assistant_responded` | assistant 响应已写入历史 | `turn`、`textChars`、`toolCallCount` |
+| `tool_call_started` | 一个工具调用即将执行 | `turn`、`toolCallId`、`toolName` |
+| `tool_call_finished` | 工具已返回成功或错误结果 | `turn`、`toolCallId`、`toolName`、`isError`、`contentChars` |
+| `run_completed` | 本次 Loop 正常完成或达到最大轮次 | `turn`、`stopReason` |
 
-### 2. 工具的说明书和执行逻辑不分开
+`AgentStopReason` 今天只有 `completed` 和 `max_turns`。工具事件不包含参数正文，结果只保留错误标记和字符数，避免把密钥或敏感内容带入观测层。
 
-`Tool` 同时包含 `name`、`description`、`parameters` 和 `execute`。模型看到的参数说明与真实执行逻辑因此住在同一个对象里，不会出现“Schema 改了，执行代码忘了改”的两处漂移。
+无工具路径的顺序是 `turn_started → assistant_responded → run_completed`。有工具时，每次调用都在响应事件之后按 `tool_call_started → tool_call_finished` 成对出现；同一轮多个工具保持串行顺序。工具错误也会发出结果事件，并继续按 D005 的约定回喂给模型。达到 `maxTurns` 时，最后一个事件仍是 `run_completed`，但其 `stopReason` 为 `max_turns`。
 
-`ToolRegistry.list()` 只输出 Schema，不把 `execute` 暴露给 Provider；`ToolRegistry.execute()` 才负责真正的函数调用。
+### 3. EventSink 是同步且可选的
 
-### 3. 工具失败不是 Loop 失败
+`EventSink.emit(event)` 返回 `void`。Loop 在原有执行点同步调用它，不建立队列，也不引入异步调度。`runAgentLoop` 接收可选的 `eventSink`；不传 sink 时，消息历史、工具回喂、累计用量和终止行为都保持不变。
 
-未知工具、非法 JSON 参数、文件不存在、路径越狱，都不应该直接终止整个 Agent。
+### 4. Logger 只是事件的一种消费者
 
-注册表把执行异常转换为 `isError: true` 的 `ToolResult`，Loop 再把它写成 `tool` 消息。模型能看到失败原因，下一轮可以修正路径、更换工具或向用户解释。
+`createLoggerEventSink(logger)` 把五种事件映射为现有 JSON 日志。assistant 响应使用 `debug`，`completed` 使用 `info`，`max_turns` 使用 `warn`。CLI 只通过这个适配器观测 Loop，不再同时传入 Logger，因此同一事实不会打印两次；最后的运行摘要仍由 CLI 自己输出。
 
-### 4. 消息协议必须首尾对应
-
-模型返回的每次工具调用都有 `id`。 assistant 消息保存 `toolCalls`，对应的工具结果保存 `toolCallId`；Provider 再把它们转换成 OpenAI 线格式里的 `tool_calls` 和 `tool_call_id`。
-
-纯工具调用轮次里，`content: null` 是合法响应，不能当成协议错误。只有文本和工具调用同时缺失时才拒绝响应。
-
-### 5. 文件工具先解决安全边界
-
-`read_file` 和 `list_dir` 都只接受工作区内的路径。代码先把路径解析成绝对路径，再检查它是否仍以工作区根目录为前缀，阻止 `../../etc/hosts` 这类越狱。
-
-`read_file` 最多返回 8000 字符，避免一次工具结果撑爆上下文；`list_dir` 默认排除 `.git` 和 `node_modules`。同一轮的多个工具调用目前按模型给出的顺序串行执行，并行调度留到后面单独处理。
-
-## 怎么验证这一天
+## 怎么复现这一天
 
 ```bash
-git checkout D005
+git checkout D006
 npm install
-# 在 .env 中配置 PA_MODEL_API_KEY、PA_MODEL_BASE_URL、PA_MODEL_NAME
+
+# 五种执行路径与 Logger 适配，共 7 个测试
+npx vitest run test/events.test.ts
+
+# 不传 eventSink 的 D005 行为保持不变
+npx vitest run test/loop.test.ts
+
+# 完整校验：lint + typecheck + 38 个测试
+npm run check
+```
+
+配置好模型环境变量后，也可以观察真实 CLI 日志：
+
+```bash
 npm run dev -- "读取 package.json，告诉我项目名称和版本"
 ```
 
-日志应依次出现 `loop.turn.start`、`tool.call`、`tool.result`，随后再次调用模型并以 `loop.completed` 结束。最后的运行摘要会给出累计轮次和 token 用量。
+日志会依次出现 `loop.turn.start`、`tool.call`、`tool.result`，最后根据停止原因出现 `loop.completed` 或 `loop.max_turns`。
 
-自动化校验：
+## 今天的边界
 
-```bash
-npm run check   # lint + typecheck + 31 个测试
-```
-
-测试覆盖工具协议线格式、工具结果回喂、多工具串行、未知工具、非法参数、路径越狱、内容截断与 `maxTurns` 终止。
-
-## 下一步
-
-把 Loop 的运行过程整理成统一事件模型，让日志、回放和后续 UI 共用同一份事实来源。
+事件是即时的运行事实，**不做持久化，也不提供 Replay**。本日没有事件存储、断点恢复、异步事件总线或流式响应；它们不属于这个统一事件契约的隐含能力。
