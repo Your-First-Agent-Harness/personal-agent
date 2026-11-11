@@ -55,9 +55,11 @@ runtime → ModelProvider（接口） → openai-compatible（实现） → HTTP
 ```bash
 git checkout D004
 npm install
+# 方式一：直接 export
 export PA_MODEL_API_KEY=sk-...
 export PA_MODEL_BASE_URL=https://api.openai.com/v1
 export PA_MODEL_NAME=gpt-4o-mini
+# 方式二：写进项目根目录的 .env，npm run dev 会自动加载（该文件已在 .gitignore 中）
 npm run dev -- "用一句话解释什么是 Agent Harness"
 ```
 
