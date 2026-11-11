@@ -6,6 +6,7 @@ import {
   ModelError,
 } from '../adapters/model/openai-compatible.ts';
 import type { Message } from '../core/message.ts';
+import { createLoggerEventSink } from '../observability/event-sink.ts';
 import { createLogger } from '../observability/logger.ts';
 import { runAgentLoop } from '../runtime/loop.ts';
 import { createBuiltinTools } from '../tools/fs.ts';
@@ -63,7 +64,7 @@ if (prompt === '') {
       maxTurns: config.agent.maxTurns,
       maxTokens: config.agent.maxTokensPerTurn,
       workspaceRoot: config.workspace.root,
-      logger,
+      eventSink: createLoggerEventSink(logger),
     });
 
     process.stdout.write(
