@@ -97,6 +97,7 @@ test('add', () => { assert.equal(add(2, 2), 4); });
 
 - 五轮请求的完整 assistant/tool 配对和精确事件顺序；
 - 第一次失败出现在第三次 Provider 请求，第二次成功出现在最终 Provider 请求；
+- 通过 spy 观察真实 Registry 返回值，首次命令为 `COMMAND_FAILED` 且 `retryable: true`，复测成功不携带 `error`；
 - `math.js` 最终逐字等于修复后的源码；
 - 最终 `turns: 5`、`stopReason: completed`；
 - Session 快照等于 `result.messages`；

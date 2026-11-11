@@ -2,10 +2,11 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { ChatRequest, ChatResult, ModelProvider } from '../src/adapters/model/provider.ts';
 import type { AgentEvent } from '../src/core/event.ts';
+import type { ToolResult } from '../src/core/tool.ts';
 import { Session } from '../src/memory/session.ts';
 import { runAgentLoop } from '../src/runtime/loop.ts';
 import { createBuiltinTools } from '../src/tools/builtin.ts';
@@ -93,6 +94,13 @@ describe('D015 工作区修复闭环', () => {
       ]);
       const registry = new ToolRegistry();
       for (const tool of createBuiltinTools()) registry.register(tool);
+      const toolResults: ToolResult[] = [];
+      const execute = registry.execute.bind(registry);
+      vi.spyOn(registry, 'execute').mockImplementation(async (call, context) => {
+        const toolResult = await execute(call, context);
+        toolResults.push(toolResult);
+        return toolResult;
+      });
       const events: AgentEvent[] = [];
       const session = new Session('d015-integration', [
         { role: 'system', content: '读取文件，运行测试，修复后必须复测。' },
@@ -132,6 +140,14 @@ describe('D015 工作区修复闭环', () => {
         .at(-1);
       expect(successfulRun).toMatchObject({ role: 'tool', toolCallId: 'test-2', name: 'run_command' });
       expect(successfulRun?.content).toContain('"exitCode":0');
+
+      expect(toolResults).toHaveLength(4);
+      expect(toolResults[1]).toMatchObject({
+        isError: true,
+        error: { code: 'COMMAND_FAILED', retryable: true },
+      });
+      expect(toolResults[3]?.isError).not.toBe(true);
+      expect(toolResults[3]).not.toHaveProperty('error');
 
       expect(result.messages.map((message) => message.role)).toEqual([
         'system',
