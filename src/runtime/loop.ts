@@ -1,3 +1,4 @@
+import { buildContext } from '../context/build.ts';
 import type { Message } from '../core/message.ts';
 import type { AgentStopReason, EventSink } from '../core/event.ts';
 import type { ModelProvider, TokenUsage } from '../adapters/model/provider.ts';
@@ -9,6 +10,7 @@ export interface AgentLoopOptions {
   readonly messages: readonly Message[];
   readonly maxTurns: number;
   readonly maxTokens: number;
+  readonly maxContextChars?: number;
   readonly workspaceRoot: string;
   readonly eventSink?: EventSink;
 }
@@ -40,8 +42,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
   for (let turn = 1; turn <= options.maxTurns; turn += 1) {
     options.eventSink?.emit({ type: 'turn_started', turn, messageCount: messages.length });
 
+    const requestMessages = buildContext(messages, options.maxContextChars ?? 24_000);
     const result = await options.provider.chat({
-      messages,
+      messages: requestMessages,
       maxTokens: options.maxTokens,
       tools,
     });
