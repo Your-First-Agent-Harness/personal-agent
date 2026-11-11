@@ -28,8 +28,8 @@
 
 ## 文档
 
-- 架构设计：待补（D2）
-- 决策记录：待补（D2 起，`docs/adr/`）
+- [架构设计](docs/architecture.md)：六层分层、依赖方向、一次工具调用的完整链路
+- [ADR-000：为什么不用现成框架](docs/adr/0000-why-not-framework.md)
 
 ## 开发
 
