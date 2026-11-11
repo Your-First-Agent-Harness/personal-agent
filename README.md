@@ -1,45 +1,63 @@
-# D010 · 覆盖率关卡与周复盘
+# D011 · 带保护的 write_file
 
 ## 今天要做出的东西
 
-- 用与 Vitest 5 匹配的 `@vitest/coverage-v8` 生成 V8 覆盖率报告，新增 `npm run test:coverage`。
-- 统计 `src/**/*.ts`，只排除 CLI 入口 `src/cli/main.ts`；`src/runtime`、`src/context` 等核心目录不能被排除。
-- 把 statements / lines / functions / branches 的最低阈值设为 **80 / 80 / 80 / 75**，低于任一阈值命令就失败。
-- CI 保留 lint 和 typecheck，最后的测试步骤与本地一样执行 `npm run test:coverage`。
-- 根据报告补核心可观察行为测试：非法配置形状、Session 嵌套 `toolCalls` 深复制、极小上下文预算、取消检查点和非取消异常、Logger 的 error 分支。已有 REPL 空输入/退出、system 超限、工具组截断及事件映射测试不重复添加。
+- 新增 `write_file`，让模型在工作区内创建文本文件，成功后返回输入路径和 JavaScript 字符数（`content.length`，不是 UTF-8 字节数）。
+- 默认禁止覆盖已有文件；只有显式传入 `overwrite: true` 才替换内容。
+- 父目录必须已经存在，缺失或不是目录时返回可读工具错误，不自动创建目录。
+- 把工作区路径边界检查提取到 `src/tools/workspace.ts`，由 `read_file`、`list_dir` 和 `write_file` 共同复用。
+- `src/tools/builtin.ts` 以 `read_file`、`list_dir`、`write_file` 的稳定顺序组合工具，CLI 只从这个入口注册。
 
-## 怎么运行和阅读报告
+## 工具参数与示例
 
-```bash
-git switch D010
-npm install
-npm run test:coverage
+```json
+{
+  "path": "note.txt",
+  "content": "你好",
+  "overwrite": false
+}
 ```
 
-终端会输出文本表格，同时生成 `coverage/index.html`。`coverage/` 已被 Git 忽略，生成的报告不应提交。
+`path` 和 `content` 必填，`overwrite` 可选且默认为 `false`，Schema 不接受额外字段。
 
-| 指标 | 含义 | 最低阈值 |
+| 场景 | 工具参数 | 结果 |
 |---|---|---|
-| statements | 已执行的语句比例；一行可能包含多条语句 | 80% |
-| lines | 至少执行过一次的源码行比例 | 80% |
-| functions | 至少被调用过一次的函数比例 | 80% |
-| branches | `if`、条件表达式等分支中实际走过的路径比例 | 75% |
+| 新建 | `{ "path": "note.txt", "content": "你好" }` | 返回 `已写入 note.txt（2 字符）`，文件内容为 `你好` |
+| 默认覆盖已有文件 | `{ "path": "note.txt", "content": "新内容" }` | 返回“默认不覆盖”错误，原内容不变 |
+| 显式覆盖 | `{ "path": "note.txt", "content": "新内容", "overwrite": true }` | 写入成功，文件内容变为 `新内容` |
+| 父目录缺失 | `{ "path": "missing/a.txt", "content": "text" }` | 返回“父目录不存在或不是目录”错误，不创建 `missing/` |
+| 路径越狱 | `{ "path": "../../outside.txt", "content": "text" }` | 路径保护拒绝执行，不写工作区外文件 |
 
-表格中的 `Uncovered Line #s` 用来定位缺口，但补测试前要判断它是否对应规格中的可观察行为。覆盖率是回归下限，不是正确性的充分证明；不为凑数字测试 trivial getter，也不通过降低阈值或排除核心源码过关。
+## 怎么复现
 
-完整检查仍然是：
+```bash
+git switch D011
+npm install
+npx vitest run test/write-file.test.ts
+```
+
+只复现某个教学示例：
+
+```bash
+npx vitest run test/write-file.test.ts -t "新建文件"
+npx vitest run test/write-file.test.ts -t "默认拒绝覆盖"
+npx vitest run test/write-file.test.ts -t "显式覆盖"
+npx vitest run test/write-file.test.ts -t "父目录不存在"
+npx vitest run test/write-file.test.ts -t "Loop 集成"
+```
+
+Loop 集成测试使用脚本化 Provider，依次发起 `write_file → read_file → 最终回答`。第二轮模型请求包含写入结果，第三轮包含写入和读取结果，同时断言临时工作区中的文件内容正确。所有文件测试都使用临时目录并在结束后清理，不需要真实模型、密钥或 `.env`。
+
+完整验证：
 
 ```bash
 npm run check
 npm run test:coverage
 ```
 
-所有测试都使用脚本化 Provider 或本地假实现，不需要真实模型、密钥或 `.env`。
-
 ## 今天的边界
 
-- **字符预算不等于 token。** D008 的上下文限制是字符级近似，不是精确 tokenizer 或模型计费口径。
-- **内存 Session 不持久化。** D007 的历史随进程结束而消失，不支持跨进程恢复。
-- **同步工具不能中途取消。** D009 只能在操作边界协作式响应取消，无法强断已经开始的同步文件读写；命令子进程终止属于 D013。
-
-本周重排原因、D006–D010 的每日验证命令和后续入口见 [`docs/weekly/2026-w47.md`](docs/weekly/2026-w47.md)。D011 的 `write_file` 不在本日提前实现。
+- **不自动 mkdir。** 调用方必须先创建父目录；本工具不递归创建 `missing/`。
+- **不做原子写入。** 当前直接调用 `writeFileSync`，没有临时文件替换、崩溃恢复或并发锁。
+- **不做版本历史。** 显式覆盖会替换旧内容，不保留快照或撤销记录。
+- **路径保护不等于命令沙箱。** 本日只实现文本写入；`edit_file`、`run_command` 和 D014 的结构化错误不在本日范围内。

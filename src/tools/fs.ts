@@ -1,22 +1,9 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
 
-import type { Tool, ToolContext } from '../core/tool.ts';
+import type { Tool } from '../core/tool.ts';
+import { resolveInWorkspace } from './workspace.ts';
 
 const MAX_FILE_CHARS = 8000;
-
-/** 路径越狱检查：解析后的绝对路径必须仍在 workspace 内 */
-function resolveInWorkspace(context: ToolContext, input: unknown): string {
-  if (typeof input !== 'string' || input.trim() === '') {
-    throw new Error('path 必须是非空字符串');
-  }
-  const root = resolve(context.workspaceRoot);
-  const target = resolve(root, input);
-  if (target !== root && !target.startsWith(root + sep)) {
-    throw new Error(`路径越出工作区：${input}`);
-  }
-  return target;
-}
 
 export const readFileTool: Tool = {
   name: 'read_file',
@@ -74,7 +61,3 @@ export const listDirTool: Tool = {
     });
   },
 };
-
-export function createBuiltinTools(): Tool[] {
-  return [readFileTool, listDirTool];
-}
