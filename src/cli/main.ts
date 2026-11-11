@@ -9,7 +9,7 @@ import { Session } from '../memory/session.ts';
 import { createLoggerEventSink } from '../observability/event-sink.ts';
 import { createLogger } from '../observability/logger.ts';
 import { runAgentLoop } from '../runtime/loop.ts';
-import { createBuiltinTools } from '../tools/fs.ts';
+import { createBuiltinTools } from '../tools/builtin.ts';
 import { ToolRegistry } from '../tools/registry.ts';
 import { runRepl } from './repl.ts';
 
