@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "repository": "Your-First-Agent-Harness/personal-agent",
+  "capturedAt": "2026-11-12T16:17:49.466Z",
+  "query": {
+    "command": "gh issue list --repo Your-First-Agent-Harness/personal-agent --state all --limit 1000 --json number,title,state,author,url,labels,createdAt,updatedAt,closedAt,body,comments",
+    "state": "all",
+    "limit": 1000
+  },
+  "summary": {
+    "total": 0,
+    "open": 0,
+    "closed": 0,
+    "byCategory": {
+      "bug": 0,
+      "documentation": 0,
+      "enhancement": 0,
+      "question": 0,
+      "other": 0
+    }
+  },
+  "issues": []
+}

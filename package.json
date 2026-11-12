@@ -34,6 +34,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:acceptance": "node scripts/verify-g1-install.ts",
+    "feedback:archive": "node scripts/archive-feedback.ts",
     "check": "npm run lint && npm run typecheck && npm run test",
     "prepack": "npm run build",
     "demo:g1": "node dist/cli/main.js demo",
