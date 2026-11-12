@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "check": "npm run lint && npm run typecheck && npm run test",
-    "demo:d015": "node --env-file-if-exists=.env scripts/d015-real-ark.ts"
+    "demo:d015": "node --env-file-if-exists=.env scripts/d015-real-ark.ts",
+    "demo:d018": "node scripts/d018-real-repair.ts"
   },
   "license": "MIT",
   "devDependencies": {
