@@ -1,0 +1,15 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 demo:d042
+> node scripts/d042-weather.ts
+
+D042 Demo：真实 AgentLoop + 离线确定性模型 + weather_current。
+transport=live：真实 Open-Meteo HTTPS API，无 API Key。
+host=api.open-meteo.com
+输入={"latitude":31.2304,"longitude":121.4737}
+工具调用=weather_current 参数={"latitude":31.2304,"longitude":121.4737}
+最终回答=Open-Meteo 当前天气：Asia/Shanghai，观测时间 2026-11-13T07:30，温度 15.5°C，风速 7.4km/h，weather_code=3。来源：open-meteo。
+turns=2 stopReason=completed
+天气来源=open-meteo 经纬度=31.247803,121.5 时区=Asia/Shanghai observed_at=2026-11-13T07:30
+温度=15.5°C 风速=7.4km/h weather_code=3
+D042 Demo PASS：真实 Loop 已完成 toolCall → tool → final，最终回答只使用工具消息。

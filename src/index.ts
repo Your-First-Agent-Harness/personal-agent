@@ -28,3 +28,15 @@ export type {
   ToolRegistrationOptions,
   ToolRegistryPolicy,
 } from './tools/registry.ts';
+export { createWeatherCurrentTool } from './tools/weather.ts';
+export type {
+  WeatherCurrentInput,
+  WeatherCurrentResult,
+  WeatherCurrentToolOptions,
+} from './tools/weather.ts';
+export { runD042Demo } from './demo/d042.ts';
+export type {
+  D042DemoMode,
+  D042DemoOptions,
+  D042DemoReport,
+} from './demo/d042.ts';

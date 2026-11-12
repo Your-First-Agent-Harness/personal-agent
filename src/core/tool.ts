@@ -46,6 +46,10 @@ export type ToolErrorCode =
   | 'MCP_TOOL_ERROR'
   | 'MCP_RPC_ERROR'
   | 'MCP_TRANSPORT_ERROR'
+  | 'UPSTREAM_HTTP_ERROR'
+  | 'UPSTREAM_NETWORK_ERROR'
+  | 'UPSTREAM_INVALID_RESPONSE'
+  | 'UPSTREAM_RESPONSE_TOO_LARGE'
   | 'INTERNAL_ERROR';
 
 export interface ToolErrorDetail {
