@@ -1,208 +1,221 @@
-# Personal Agent Harness
+# Personal Agent · 第 38 天
 
-> **进度：D037 / D100 · v0.1.0** · Node.js 24 原生 TypeScript ESM
+> 进度：D038 / D100 · v0.1.0
+>
+> 主题：复盘「文档、示例、issue 处理」——把 D034–D037 的 MCP 协议、Client、Server 与文件双后端整理成可安全复现的使用文档
+>
+> 今日交付：完整 MCP 中文使用文档、可运行示例索引与故障排查表、本周复盘、真实 GitHub issue 快照，以及 D035/D036/D037 的本轮复验。没有新增运行时行为，没有提前制作 D039/D040 内容。
 
-D037 把官方 filesystem MCP Server 接入现有 `Tool` / `ToolRegistry`，同时保留本地自研 `read_file`、`list_dir`。调用方通过工厂选择 `local` 或 `mcp`；`AgentLoop`、模型请求格式和 Registry 调度逻辑不变。外部官方 Server 只由独立 `npx` 子进程启动，**没有新增项目运行时依赖**。
+## 先读这份文档
 
-## 快速验证
+**[docs/mcp.md](docs/mcp.md)** 是面向使用者的主文档，覆盖：
+
+- 当前唯一支持的协议范围：`2025-11-25`、stdio、tools。
+- Client 连接外部 Server、自有 Server 启动与官方 Inspector 验收。
+- local/MCP 文件后端的真实代码配置、命令、名称与路径映射。
+- API、生命周期、错误码、超时、取消、关闭。
+- stdout/stderr、权限、凭证、npx 供应链和路径边界。
+- 常见误用与故障排查表、本轮真实验证结果和已知限制。
+
+配套材料：
+
+- [2026-W51 本周复盘](docs/weekly/2026-w51.md)：D034–D037 的设计取舍与限制。
+- [D038 真实 issue 快照](docs/feedback/d038-v0.1-issues.json)：日期、查询命令、数量和空 issues 数组。
+- [D034 协议说明](docs/d034-mcp-protocol.md) 与 [生命周期时序](docs/d034-mcp-sequence.md)。
+- [D035 历史外部 Client transcript](docs/d035-external-transcript.txt)。
+- [D036 历史官方 Inspector transcript](docs/d036-inspector-transcript.txt)。
+- [D037 历史双后端 transcript](evidence/d037-transcript.txt)。
+
+历史 transcript 只用于对照，不冒充 D038 本轮运行；本轮结果见下文和 `docs/mcp.md` 第 11 节。
+
+## 环境与快速验证
+
+要求 Node 24、npm。项目仍是原生 TypeScript ESM，零新增 MCP 运行时依赖：
 
 ```bash
 npm install
 npm run check
 npm run test:coverage
-
-# 启动真实官方 Server，比较 local / MCP；首次运行需要网络下载 npx 包
-npm run demo:d037
 ```
 
-真实官方验证 transcript：[`evidence/d037-transcript.txt`](./evidence/d037-transcript.txt)。本次实际使用：
+外部 Server 与 Inspector 通过固定版本的 `npx --yes` 临时执行，首次或缓存失效时需要 npm 网络。issue 查询另外需要 GitHub 网络和已登录的 `gh`。环境失败不能写成协议验证成功。
 
-- npm 包：`@modelcontextprotocol/server-filesystem@2025.11.25`（精确版本，不使用 `latest`）。
-- Server 自报：`secure-filesystem-server@0.2.0`。
-- Client 请求并协商：MCP `2025-11-25`，stdio + NDJSON。
-- 两种后端均完成真实 `AgentLoop` 三轮：列目录、读文件、最终回答；Server 关闭、临时目录删除，进程退出码 `0`。
+## 四条可运行路径
 
-## 为什么做适配，而不是重写 AgentLoop
+### 1. Client 连接真实外部 Server
 
-`AgentLoop` 的依赖应当只是稳定的 Tool 契约，而不是某个进程通信协议：
-
-```text
-模型/脚本
-   │  始终调用 read_file / list_dir
-   ▼
-AgentLoop → ToolRegistry → Tool.execute(args, context)
-                              │
-                ┌─────────────┴──────────────┐
-                ▼                            ▼
-          本地 fs Tool                 MCP Tool 适配层
-                                          │  StdioMcpClient
-                                          ▼
-                         npx @modelcontextprotocol/server-filesystem
+```bash
+npm run demo:d035
 ```
 
-适配层负责协议差异，Loop 不需要判断后端：
+实际启动 `@modelcontextprotocol/server-everything@2025.11.25`，完成 initialize、tools/list、echo tools/call 与子进程关闭。完整代码是 `scripts/d035-external.ts`，没有使用虚拟 Client 替代外部进程。
 
-1. 把 MCP `tools/list` 的 `inputSchema` 投影为 Tool `parameters`。
-2. 把 Registry 已解析的对象参数交给 `tools/call`，继续传递 `AbortSignal`。
-3. 把 MCP `content`、`isError`、`structuredContent.error` 和 JSON-RPC/传输异常转换成 `ToolResult`。
-4. 在工厂中完成连接、能力发现、必要工具校验与关闭，失败不会留下无人管理的子进程。
+### 2. 启动自有只读 MCP Server
 
-核心入口：
-
-- `src/adapters/mcp-tool.ts`：通用远端 Tool 投影、显式别名/参数映射、结果与错误转换。
-- `src/tools/filesystem-backend.ts`：`local` / `mcp` 工厂和 filesystem 专用安全投影。
-- `src/adapters/mcp-stdio-client.ts`：复用 D035 Client；本日没有另写一套 JSON-RPC Client。
-- `src/demo/d037.ts`：真实 Loop 双后端对比。
-
-## 如何切换后端
-
-### local：现有自研文件工具
-
-```ts
-import { createFilesystemBackend } from './src/tools/filesystem-backend.ts';
-
-const backend = await createFilesystemBackend({ backend: 'local' });
-try {
-  // 把 backend.registry 注入现有 runAgentLoop。
-  const tools = backend.registry.list(); // read_file, list_dir
-} finally {
-  await backend.close();
-}
+```bash
+npm run mcp:server
 ```
 
-`local` 直接注册现有 `readFileTool`、`listDirTool`，没有复制实现。
+该命令等待 stdio Client，不会自行结束。`src/demo/d036-mcp-server.ts` 创建安全临时工作区，只暴露 `read_file/list_dir`；stdout 只写协议，日志写 stderr，关闭后删除临时目录。
 
-### mcp：官方 filesystem Server
+### 3. 用独立官方 Inspector 调用自有 Server
 
-```ts
-import { StdioMcpClient } from './src/adapters/mcp-stdio-client.ts';
-import { createFilesystemBackend } from './src/tools/filesystem-backend.ts';
+```bash
+npx --yes @modelcontextprotocol/inspector@2.15.0 \
+  --cli --transport stdio --format json --method tools/list \
+  -- node src/demo/d036-mcp-server.ts
 
-const client = new StdioMcpClient({
-  command: 'npx',
-  args: [
-    '--yes',
-    '@modelcontextprotocol/server-filesystem@2025.11.25',
-    '/显式/允许的/workspace',
-  ],
-  requestTimeoutMs: 30_000,
-  closeTimeoutMs: 2_000,
-});
-const backend = await createFilesystemBackend({ backend: 'mcp', client });
-try {
-  // 与 local 完全相同的 Registry 注入点。
-} finally {
-  await backend.close(); // 幂等；D035 Client 负责 EOF/SIGTERM 与超时兜底。
-}
+npx --yes @modelcontextprotocol/inspector@2.15.0 \
+  --cli --transport stdio --format json --method tools/call \
+  --tool-name read_file --tool-args-json '{"path":"README.txt"}' \
+  -- node src/demo/d036-mcp-server.ts
 ```
 
-工厂执行 `connect → listAllTools → 校验 read_file/list_directory → 注册投影`。缺少必要工具或握手失败时会主动 `close()`。Demo 还给官方进程只传递 `PATH`、`HOME` 等启动所需环境，不读取模型、Git 或云服务凭证。
+initialize 命令、参数细节和预期结果见主文档。当前没有 `demo:d036:inspector` npm script；Inspector 会自己启动 Server，不要再手工启动一份 `mcp:server`。
 
-## 显式别名与路径映射
-
-官方读工具叫 `read_file`，列目录工具叫 `list_directory`，且都要求绝对路径；本项目既有模型契约使用 `read_file` / `list_dir` 和工作区相对路径。filesystem 投影因此是显式的，而不是按名称猜测：
-
-| Registry 暴露 | MCP 实际调用 | 参数转换 |
-| --- | --- | --- |
-| `read_file` | `read_file` | `{path:'note.txt'}` → `{path:'/allowed/workspace/note.txt'}` |
-| `list_dir` | `list_directory` | `{}` → `{path:'/allowed/workspace'}` |
-
-转换前复用 `resolveInWorkspace`，所以 `../secret` 在本地边界得到 `PATH_OUTSIDE_WORKSPACE`，请求不会到达外部 Server。官方 Server 的 allowed directory 同时被限制为同一个临时/显式工作区，形成第二层防护。
-
-通用适配器默认保留远端名称、description 和 `inputSchema`；filesystem 工厂为了维持既有 Agent 契约，**有意覆盖**公开名称、description 和 Schema，并在上述调用边界转换参数。这不是暗中改变语义。
-
-即使官方 Server 还列出 `write_file` 等工具，工厂也只挑选这两个只读能力。未知 `write_file`、`shell` 等调用由 Registry 返回 `UNKNOWN_TOOL`，不会转发。
-
-## 哪些语义保持一致，哪些天然不同
-
-### 保持一致
-
-- Loop/模型看到相同的 `read_file`、`list_dir` 名称、description、公开 JSON Schema 和相对路径约定。
-- Registry 继续负责 JSON 解析、Schema 校验、未知工具和权限边界；非法 JSON/参数不会进入 MCP。
-- 两种后端都返回 `ToolResult`，Loop 的消费方式不变。
-- 本地 `ToolError`（例如路径逃逸）保留原错误码；远端结构化错误若使用本项目已知错误码，会保留 code/message/hint/retryable。
-- 正常文本 content、`isError` 和结构化错误都有受测转换。
-
-### 不假装完全一致
-
-- **列目录格式不同**：local 使用 `nested/`、`note.txt`；官方使用 `[DIR] nested`、`[FILE] note.txt`。
-- **读取限制/提示不同**：local 保留自身的行数、字节和超长截断提示；官方 Server 可能有自己的大文件策略和文案。
-- **错误文案和细分码不同**：本地文件错误来自自研 Tool；官方普通失败常是 `isError + text`，映射为 `MCP_TOOL_ERROR`，不会伪装成完全相同的本地异常。
-- MCP 非文本 content block 以 JSON 文本拼入 `ToolResult.content`；当前 Tool 契约没有二进制内容通道。
-- 成功结果的 `structuredContent` 不被伪造为额外 Tool 字段；本日结构化转换重点是 `structuredContent.error`。
-- 协议和进程故障有额外的稳定错误码：`MCP_RPC_ERROR`、`MCP_TRANSPORT_ERROR`；请求超时/取消沿用 `TOOL_TIMEOUT` / `TOOL_CANCELLED`。
-
-因此，切换保证的是**工具入口和 Loop 契约一致**，不是输出字节或所有错误细节完全一致。
-
-## 对比 Demo
+### 4. 同一任务比较 local / MCP 文件后端
 
 ```bash
 npm run demo:d037
 ```
 
-`src/demo/d037.ts` 创建一个临时工作区，写入相同的 `note.txt` 和 `nested/`，然后用同一个确定性脚本 ModelProvider 分别运行两个真实 `AgentLoop`。它不是直接调用脚本函数冒充 Harness 集成，也不需要模型 API Key。
+脚本在同一临时工作区中依次执行 local 和 MCP 半程。它使用确定性假模型，不访问真实模型 API；MCP 半程连接固定版本 `@modelcontextprotocol/server-filesystem@2025.11.25`。
 
-每次调用输出：
+后端选择是代码配置，不是环境变量：
 
-- `backend=local|mcp`；
-- Loop 看到的 `exposed` 工具名与原始 `args`；
-- 实际远端 `remote` 工具名与 `remoteArgs`；
-- 结果摘要和 `isError`；
-- 协商协议、Server 名称/版本和 `closed=true`。
-
-本次官方结果：两种后端读取到相同 `D037 shared workspace\n`，列目录格式如上述表格不同；MCP 记录明确显示 `list_dir {} → list_directory {path:<临时绝对路径>}`。最后删除临时目录并输出 `workspaceRemoved=true`。
-
-默认测试通过依赖注入使用本地 stdio fixture，保持离线确定；官方 Demo 是另外实际执行过的验收，**没有用自研 D036 Server 替代官方验证**。
-
-## 错误与生命周期验收
-
-- MCP `isError`：保留文本；识别并保留结构化 ToolError，否则得到 `MCP_TOOL_ERROR`。
-- JSON-RPC error：转换成 `MCP_RPC_ERROR`，不悬挂 Loop。
-- 请求超时：D035 Client 有界等待，适配为 `TOOL_TIMEOUT`。
-- 子进程退出：在途请求被拒绝并适配为 `MCP_TRANSPORT_ERROR`，之后仍能关闭。
-- 未知工具、路径逃逸：在外部调用前拦截。
-- 初始化能力不完整：关闭 Client 并拒绝构造不完整后端。
-- 后端 `close()` 幂等；Demo 每个后端都在 `finally` 中关闭，工作区也在 `finally` 中删除。
-
-## TDD 实录
-
-本日新行为遵循 RED → GREEN：
-
-1. **通用适配 RED**：先写 `test/d037-mcp-tool.test.ts`，因 `mcp-tool.ts` 不存在而失败。最小实现后覆盖 Schema、对象参数、文本/非文本 content、`isError`、结构化错误、JSON-RPC、超时、取消和传输错误。
-2. **别名 RED**：新增显式投影测试时实际出现 `1 failed / 4 passed`；补 `McpToolProjection` 后，确认 Registry 只看到本地名称/Schema，而 Client 收到远端名称/映射参数。
-3. **filesystem 后端 RED**：`test/d037-filesystem-backend.test.ts` 首先因工厂模块不存在失败；最小实现后，路径逃逸测试进一步促成 `ToolError` 原样转换。最终覆盖只读工具集合、绝对路径、切换、缺失能力和幂等关闭。
-4. **stdio 组合验收**：真实本地 fixture 跑通握手、Registry 调用、超时和进程退出。全套高并发检查曾让 100ms 的握手先于目标超时路径失败，因此将 fixture 请求超时调为 1 秒；仍断言工具超时 2 秒内返回。
-5. **Demo RED**：`test/d037-demo.test.ts` 首先因 `src/demo/d037.ts` 不存在失败；实现后双后端真实 Loop、实际远端参数、关闭和清理测试转绿。测试中的 stop reason 按既有 Loop 契约使用 `completed`，没有为本日改写 Loop。
-
-最终验证：
-
-```text
-npm run check          → 44 个测试文件，393 项测试全部通过
-npm run test:coverage  → 44 个测试文件，393 项测试全部通过
+```ts
+await createFilesystemBackend({ backend: 'local' });
+await createFilesystemBackend({ backend: 'mcp', client });
 ```
 
-全项目覆盖率：statements **92.37%**、branches **87.59%**、functions **99.09%**、lines **94.02%**。新增 `mcp-tool.ts` statements/lines 均 **100%**，`filesystem-backend.ts` statements/lines 均 **100%**，`d037.ts` statements **93.93%**、lines **96.55%**。
+当前没有 `MCP_BACKEND` 或 `--backend` 开关。完整 Client 配置、Registry 执行与关闭方式见 `src/demo/d037.ts` 和主文档。
 
-## 文件清单
+## 本周教学主线：协议 → Client → Server → 适配层
 
-- `src/adapters/mcp-tool.ts`
-- `src/tools/filesystem-backend.ts`
-- `src/demo/d037.ts`
-- `scripts/d037-compare.ts`
-- `test/d037-mcp-tool.test.ts`
-- `test/d037-filesystem-backend.test.ts`
-- `test/d037-stdio-integration.test.ts`
-- `test/d037-demo.test.ts`
-- `test/fixtures/d037-filesystem-server.ts`
-- `evidence/d037-transcript.txt`
+### D034：先把协议子集说准确
 
-`src/core/tool.ts` 只增加 MCP 错误码，`package.json` 只增加 `demo:d037`。主 `src/index.ts` 和既有 CLI 默认后端未改；切换由本日工厂显式注入。
+先固定 `2025-11-25`、JSON-RPC 2.0、ndjson stdio 和 tools，再定义 initialize→initialized→list/call、ping、取消和 stdio 关闭。stdout 不能混日志，通知不能回复，不能用自造 shutdown 代替传输关闭。
 
-## 限制
+**取舍**：用明确的小子集换可实现、可测试、可审查，而不是泛称“完整 MCP”。
 
-- 只接 filesystem 的 `read_file` / `list_directory`，不开放写、移动、删除、搜索或 shell 工具。
-- 只验证 MCP `2025-11-25` stdio；没有 HTTP/WebSocket 传输，也没有扩展其他协议版本。
-- 官方包精确固定为 `2025.11.25`；升级时需重新核对工具 Schema、allowed-directory 行为和协议兼容性。
-- `npx` 首次执行需要网络；离线 CI 使用本地 fixture，正式官方验收仍需显式运行 Demo。
-- 本日交付的是 filesystem Registry 工厂，不是全局配置迁移；现有 CLI 和其他内置工具保持原行为。
-- stdio 本机进程隔离不等于多租户安全边界。生产接入仍需审计外部包、工作区权限、输出内容和资源限制。
+### D035：Client 的主体是状态与资源管理
+
+`StdioMcpClient` 不仅发送请求，还负责状态机、request id、pending、capabilities、分页上限、stderr 上限、超时/AbortSignal 和子进程退出。外部 Server 版本必须精确协商到 `2025-11-25`。
+
+**取舍**：零新增运行时依赖意味着自己维护协议边界；收益是错误和清理可控，限制是不重连、不支持其他传输和完整 MCP 能力。
+
+### D036：Server 复用 Registry，不复制工具逻辑
+
+`McpStdioServer` 把 Registry 的 name/description/parameters 投影为 MCP 工具，把 arguments object 序列化为 Registry 的 JSON 字符串，并复用原 Schema、权限和 ToolResult。
+
+**取舍**：`toolNames` 显式白名单减少暴露；协议错误与工具 `isError` 分层；并发响应按 id 配对；取消传真实 AbortSignal，但不能强制结束不合作 Tool。
+
+### D037：切换后端不等于无差异透传
+
+文件适配层始终只给 Agent 两个只读工具：
+
+| 本地契约 | MCP 远端 |
+|---|---|
+| `read_file` | `read_file` |
+| `list_dir` | `list_directory` |
+| 工作区相对路径 | 先做越界检查，再映射为绝对路径 |
+
+远端写工具不会自动进入 Registry。两种后端共享调用入口和任务流程，但目录文本格式、内容块和错误细节不保证逐字节一致。
+
+**取舍**：显式映射增加少量维护成本，换来稳定模型契约和最小权限；不把“都是文件工具”误认为零适配。
+
+完整复盘见 [docs/weekly/2026-w51.md](docs/weekly/2026-w51.md)。
+
+## 示例与排障索引
+
+| 需求 | 入口 | 网络/凭证 |
+|---|---|---|
+| 外部 everything Server 的 echo | `npm run demo:d035` | npm 网络或缓存；不需要模型 Key |
+| 自有 Server 长驻 stdio | `npm run mcp:server` | 无外部网络 |
+| 独立官方 Client 验收 | `docs/mcp.md` 第 5.2 节三条 Inspector 命令 | npm 网络或缓存 |
+| local/MCP 同一任务 | `npm run demo:d037` | MCP 半程需要 npm 网络或缓存；无模型 Key |
+| stdout 非 JSON、未初始化、版本混用 | `docs/mcp.md` 第 10 节排障表 | 按真实错误码定位 |
+| `isError` 与 JSON-RPC error | `docs/mcp.md` 第 7 节 | 同时处理 Promise reject 和 resolved isError |
+| 超时、取消、关闭 | `docs/mcp.md` 第 8 节 | Tool 必须配合 AbortSignal |
+| local/MCP 路径和工具名 | `docs/mcp.md` 第 6 节 | `list_dir→list_directory`，相对→绝对 |
+| 权限、凭证、路径边界 | `docs/mcp.md` 第 9 节 | 最小 env、工具白名单、非完整 OS 沙箱 |
+
+## D038 本轮真实示例复验
+
+实际执行日期：**2026-11-13（Asia/Shanghai）**。环境：Node `v24.19.0`、npm `11.17.0`。基线：`e1ad63b9d51218c9ad47448a097739848b238569`。
+
+| 本轮执行 | 退出码 | 真实观察 |
+|---|---:|---|
+| `npm run demo:d035` | 0 | everything Server 协商 `2025-11-25`；发现 11 个工具；echo 返回 `D035 real external MCP stdio call`；PASS 并关闭 |
+| Inspector initialize | 0 | 返回 `personal-agent-safe-demo`、tools capability、`2025-11-25` |
+| Inspector tools/list | 0 | 返回两个真实 Registry 工具及 inputSchema |
+| Inspector tools/call read_file | 0 | 返回临时 README 真实内容，`isError:false`；Server 停止并清理 |
+| `npm run demo:d037` | 0 | local/MCP 都 list→read、3 turns、completed、closed；MCP 使用 `list_directory` 与绝对路径；`workspaceRemoved=true` |
+
+本轮出现的 npm `Unknown user config "home"` warning 来自本机 npm 配置，不影响退出码。自查时还确认了两个容易写错的命令：自有 Server 的真实脚本名是 `mcp:server`，issue archive 的输出路径是位置参数而不是 `--output`。文档只保留已验证的正确形式。
+
+## issue 处理：真实查询，零也不编造
+
+本轮先执行：
+
+```bash
+npm run feedback:archive -- docs/feedback/d038-v0.1-issues.json
+```
+
+归档结果：
+
+```text
+ISSUE_ARCHIVE_PASS total=0 open=0 closed=0
+```
+
+随后用以下命令独立复核，真实输出为 `[]`：
+
+```bash
+gh issue list --state all --limit 100 --json number,title,state,createdAt,closedAt,url
+```
+
+快照文件保留：
+
+- repository：`Your-First-Agent-Harness/personal-agent`
+- capturedAt：`2026-11-12T21:44:37.687Z`（UTC）
+- 完整 `gh issue list --repo ... --state all --limit 1000 ...` 命令
+- total/open/closed：均为 0
+- issues：空数组
+
+因此本日**没有可处理的真实 issue**，没有创建虚构用户、虚构文档反馈或关闭记录，也没有修改任何真实 issue。替代性自查限于：核对真实导出与脚本、复跑三组示例、检查文档相对链接、写明网络依赖和已知限制。
+
+## TDD 与本日改动边界
+
+本日任务是文档、示例复验和复盘，没有新增函数、API 或运行时行为，因此不制造无意义 RED。复跑没有发现需要修复的可复现实现 bug；没有顺手重构 Client、Server、Registry 或适配层。
+
+实际新增/修改仅为：
+
+- `README.md`：D038 教学、复验、issue 与复盘入口。
+- `docs/mcp.md`：完整 MCP 中文使用文档、示例索引和排障表。
+- `docs/weekly/2026-w51.md`：D034–D037 本周复盘。
+- `docs/feedback/d038-v0.1-issues.json`：当前真实空 issue 快照。
+
+没有改 main 索引，没有新增依赖，没有制作 D039 录屏或 D040 公开课。
+
+## 最终回归与文档检查
+
+以下命令均在本轮实际执行，退出码为 0：
+
+```text
+npm run check          → ESLint、TypeScript 通过；44 个测试文件、393 项测试通过
+npm run test:coverage  → 44 个测试文件、393 项测试通过，覆盖率门禁通过
+```
+
+全项目覆盖率：statements **92.37%**、branches **87.59%**、functions **99.09%**、lines **94.02%**。项目门禁为 statements/lines/functions 80%、branches 75%，本轮全部达标。
+
+另外实际检查了 README、主文档和 weekly 中 20 个相对链接，全部指向存在的文件；`git diff --check` 通过。npm 仍有本机 `home` 配置 warning，但检查、测试和覆盖率命令均成功。
+
+## 已知限制
+
+- 仅支持 MCP `2025-11-25`、stdio、tools；不支持 HTTP、其他日期版本、resources/prompts 等能力。
+- MCP 类不是包根导出；仓库内按源文件相对路径导入。
+- Client 不可重连；自有 Server 是单 Client stdio，不分页、不发布 listChanged。
+- 自有 Server 不声明 outputSchema；双后端内容格式不保证完全一致。
+- 超时/取消不保证不合作 Tool 已停止；Client 对超时后的未知迟到响应按协议错误处理。
+- 路径越界检查不是完整 OS 沙箱；外部 Server、npx 包、环境变量与 stderr 都需最小权限和脱敏。
+- D035/D036/D037 的外部包需要网络或可信缓存；D037 的确定性模型不证明真实模型表现。
