@@ -1,337 +1,367 @@
-# D028｜Schema 与参数校验：让非法入参止步于 execute 之前
+# D029｜权限模型：让工具先获得授权，再执行
 
-> 日期：2026-12-08
-> 基线：D027 热插拔工具注册表
-> 目标：用零依赖、递归的 JSON Schema 子集校验，覆盖对象、数组、必填字段、类型和必要约束；模型输入错误统一通过 `ToolResult` 回喂，开发者声明的非法 Schema 则在注册期失败。
+> 📅 2026-12-09 ｜ 分支：`D029` ｜ 基线：D028 `9f58c37ad687a5ff8cfe24c0ee1bf86ec2dc8d83`
+> 前置：完成 D027（工具注册与热切换）、D028（JSON / Schema 参数校验）
+> 前置阅读：`docs/00-manifesto.md`、`docs/04-philosophy/quality-is-everything.md`
 
 ---
 
-## 1. 今天解决什么问题
+## 一、今天做什么
 
-D014 已经能拒绝根值类型错误、缺少必填字段、额外字段和错误标量类型，但仍有几条漏检路径：
+D028 保证“参数正确的调用才进入工具”，但还没有回答三个更靠前的问题：
 
-```json
-{
-  "profile": { "name": "", "age": -1 },
-  "tags": ["agent", 7],
-  "members": [{ "name": "Grace" }, { "name": 9 }]
-}
-```
+1. 这个调用方有没有权使用这个工具？
+2. 这个工具属于哪个租户，当前调用属于哪个租户？
+3. 高风险操作是否得到了**这一次调用**的明确确认？
 
-如果 Schema 声明 `tags` 是字符串数组、`members` 是对象数组、`name` 至少一个字符、`age` 不得小于零，上述输入都应该失败。D027 的注册表还允许开发者注册未知类型、畸形 `required`、错误 `items` 等声明，直到执行时才暴露模糊行为。
+D029 在 D027 的 `ToolRegistry` 内增加最小权限层：
 
-D028 在原有校验器上补齐两道工序，而不是另建一套工具协议：
+- **工具级白名单**：同时约束模型发现与直接执行；
+- **租户隔离**：共享工具、当前租户工具之外，其余工具不可发现、不可执行；
+- **敏感工具逐次确认**：每次执行都要针对 `toolCallId` 明确批准，不缓存批准结果；
+- **失败安全**：未确认、拒绝确认、确认回调抛错或返回非 `true`，都不会进入 `execute`；
+- **统一错误出口**：权限与确认失败仍返回可回喂模型的 `ToolResult`，不冲垮 Loop；
+- **默认兼容**：没有配置权限策略的旧 Registry、CLI 与离线 Demo 保持原有用法。
 
-1. **注册期 Schema 校验**：拒绝 Harness 不支持的类型和畸形约束。
-2. **执行前参数校验**：递归检查 JSON 参数，在调用工具的 `execute` 之前返回结构化错误。
+今天不实现账户系统、登录、角色权限、审批 UI、网络服务，也不提前实现 D030。
 
-本日不引入 `zod`、其他运行时依赖或代码生成器。这里借鉴的是 zod / pydantic 的“先解析输入，再交给业务函数”思想，保留项目已有的 `Tool`、`ToolResult` 和 JSON Schema 格式。
+### 学习成果
 
-## 2. 设计：两道门，两个受众
+完成后应能回答：
 
-### 2.1 开发者注册工具时
+- 为什么模型生成的 `ToolCall` 是待授权请求，而不是执行命令？
+- 为什么白名单 / 租户检查要先于 JSON 与 Schema 校验？
+- 为什么敏感确认要放在参数校验之后、`execute` 之前？
+- `allowedTools: undefined` 和 `allowedTools: []` 有什么本质区别？
+- 为什么不能让调用方通过 `ToolContext.tenantId` 自己声明租户？
+- 为什么“上次同意过”不能推出“这次也同意”？
 
-`register` 和 `replace` 都经过同一个 `createEntry`，因此声明检查只需放在这里：
+---
 
-```text
-register / replace
-        │
-        ▼
-检查名称、描述、parameters、execute、版本和元数据
-        │
-        ▼
-validateToolSchema(parameters)
-        │
-        ├─ 非法 → 抛出带 Schema 路径的 TypeError，不写入注册表
-        │
-        └─ 合法 → 按 D027 语义注册或原子替换
-```
+## 二、Threat boundary：信任边界在哪里
 
-Schema 是**开发者代码**，不是模型本轮可以修正的输入。因此非法声明使用 `TypeError`，而不是伪装成一次工具执行失败。
+### 2.1 不受信任的输入
 
-`replace` 仍然先完整创建新 entry、再更新 Map。新 Schema 非法时，旧工具的名称、描述、版本和执行函数都保持不变，热插拔能力不回退。
+以下内容都应视为不可信，即使它们来自模型：
 
-### 2.2 模型调用工具时
+- `toolCall.name`、`toolCall.arguments`、`toolCall.id`；
+- 模型猜测的、没有出现在本轮 Schema 列表里的工具名；
+- 调用方在 `execute` 的上下文中传入的 `tenantId`；
+- 畸形 JSON、错误类型，以及试图探测隐藏工具参数规则的请求。
 
-```text
-模型的 arguments 字符串
-        │
-        ▼
-JSON.parse（空字符串按 D014 兼容语义视为 {}）
-        │
-        ├─ JSON 语法错误 → INVALID_JSON ToolResult
-        │
-        ▼
-validateArguments（从根值开始递归）
-        │
-        ├─ Schema 校验失败 → INVALID_ARGUMENTS ToolResult，execute 零调用
-        │
-        ▼
-entry.tool.execute(parsedArguments, context)
-        │
-        ▼
-工具业务结果或工具业务错误
-```
+模型可以提出调用意图，但只有宿主配置的 Registry 策略能决定它是否可见、是否可执行。
 
-模型输入属于**可修正的调用错误**，所以仍然回喂 `{ isError: true, error: { code, message, hint, retryable } }`，由 Agent Loop 交给模型修复。JSON 解析、参数校验和执行器内部错误处理都不向 Loop 泄漏未捕获异常。
+### 2.2 受信任的宿主配置
 
-## 3. Schema 声明：模型看到的仍是普通 JSON Schema
+以下能力属于部署方 / 宿主的受信任管理面，不应直接暴露给模型：
 
-下面是一个同时包含嵌套对象、数组、必填字段和约束的示例：
+- `new ToolRegistry(policy)` 中的白名单、租户身份与确认回调；
+- `register`、`replace`、`unregister` 等 Registry 管理操作；
+- 把某个工具声明为 `tenantId` 或 `sensitive`；
+- 确认回调如何把请求呈现给真实用户或宿主审批系统。
 
-```ts
-const parameters = {
-  type: 'object',
-  properties: {
-    profile: {
-      type: 'object',
-      properties: {
-        name: { type: 'string', minLength: 1 },
-        age: { type: 'integer', minimum: 0, maximum: 150 },
-      },
-      required: ['name', 'age'],
-      additionalProperties: false,
-    },
-    tags: {
-      type: 'array',
-      items: { type: 'string', minLength: 1 },
-    },
-    members: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          name: { type: 'string', minLength: 1 },
-        },
-        required: ['name'],
-        additionalProperties: false,
-      },
-    },
-  },
-  required: ['profile', 'tags', 'members'],
-  additionalProperties: false,
-};
-```
+一个 Registry 实例代表一个调用主体。需要服务多个租户时，由宿主为各主体建立并保存正确的 Registry，而不是把模型提供的租户字符串当作认证结果。
 
-注册表把这个对象原样放进 `function.parameters`，不添加私有字段，不改变 OpenAI-compatible 模型的 Tool Schema 格式。`minLength`、`minimum` 和 `maximum` 同时具有两个作用：
+### 2.3 本日边界不防御什么
 
-- 给模型更明确的生成约束；
-- 在服务端真正执行约束，而不是信任模型一定遵守描述。
+这是进程内权限层，不是完整安全边界：
 
-### 3.1 本日明确支持的子集
+- 不防御已经能修改宿主内存、Registry 或配置对象的恶意代码；
+- 不验证租户身份凭证，`tenantId` 只是宿主绑定的隔离标签；
+- 不提供用户登录、角色体系、跨进程授权或网络访问控制；
+- 不自动判断工具是否敏感，注册者必须显式声明；
+- 不代替工具自身的路径、文件类型、退出码等业务约束。
 
-| 关键字 | 行为 |
-| --- | --- |
-| `type: object` | 必须是非 null、非数组对象；工具根 Schema 必须声明此类型 |
-| `type: array` | 必须是数组；`items` 存在时逐项递归校验 |
-| `type: string` | 必须是字符串；支持 `minLength` |
-| `type: number` | 必须是有限数值；支持 `minimum` / `maximum` |
-| `type: integer` | 必须是整数；支持 `minimum` / `maximum` |
-| `type: boolean` | 必须是布尔值，不把 `0` / `1` 自动转换 |
-| `type: null` | 只接受 null，主要用于嵌套声明和内部校验器 |
-| `properties` | 对象字段到子 Schema 的映射，逐层递归 |
-| `required` | 字符串数组；使用自有属性判断，字段值显式为 null 不等于缺失 |
-| `additionalProperties` | 支持布尔值；为 false 时拒绝未声明字段 |
-| `enum` | 沿用 D014 的非空允许值检查，适合字符串等标量 |
-| `items` | 一个 Schema 对象，不是元组 Schema 数组 |
-| `minLength` | 非负整数；按 Unicode 字符计数，而非 UTF-16 code unit 数 |
-| `minimum` / `maximum` | 有限数值，边界值本身合法；声明时下限不得大于上限 |
+---
 
-`description` 等供模型阅读的未知关键字继续原样保留；参数校验器不对它们赋予额外语义。本实现不是完整 JSON Schema，也不声称支持 `$ref`、`oneOf`、元组、`pattern`、`format`、对象枚举深比较或隐式类型转换。
+## 三、声明工具边界与调用方策略
 
-## 4. 注册期非法 Schema：尽早给出可定位错误
+### 3.1 工具注册：租户与敏感级别
 
-例如：
+D027 的 `version` 与 `metadata` 原样保留。D029 新增两个一等注册选项：
 
 ```ts
-registry.register({
-  name: 'broken',
-  description: '错误声明示例',
-  parameters: {
-    type: 'object',
-    properties: {
-      values: { type: 'array', items: [] },
-    },
-  },
-  execute: async () => ({ content: 'never' }),
+registry.register(readFile, {
+  version: '1.0.0',
+  metadata: { owner: 'workspace' },
+  tenantId: 'tenant-a',
+});
+
+registry.register(writeFile, {
+  version: '1.0.0',
+  metadata: { owner: 'workspace', risk: 'write' },
+  tenantId: 'tenant-a',
+  sensitive: true,
 });
 ```
 
-会同步抛出：
+语义如下：
 
-```text
-TypeError: 非法工具注册：parameters $.properties.values.items，items 必须是单个 Schema 对象（期望 object）
+| 注册选项 | 省略 | 显式配置 |
+| --- | --- | --- |
+| `tenantId` | 共享工具；兼容旧工具 | 仅精确匹配该租户的 Registry 可见、可执行 |
+| `sensitive` | 普通工具 | `true` 时，每次执行前都必须获得本次明确确认 |
+
+`metadata` 仍是调用方自己的发现与路由信息，不替代权限字段。把 `sensitive: true` 写进自定义 metadata 不会自动获得强制确认语义。
+
+### 3.2 Registry 策略：白名单、租户与确认回调
+
+```ts
+import { ToolRegistry } from '../src/index.ts';
+import type { ToolConfirmationRequest } from '../src/index.ts';
+
+async function approveOnce(request: ToolConfirmationRequest): Promise<boolean> {
+  // 由宿主接入终端、桌面确认或已有审批系统。
+  // 这里必须针对 request.callId 获取一次新的决定。
+  // 超时、取消或异常应返回 false 或抛错，Registry 会安全拒绝。
+  return await hostConfirmationPort.approveOnce(request);
+}
+
+const registry = new ToolRegistry({
+  allowedTools: ['read_file', 'write_file'],
+  tenantId: 'tenant-a',
+  confirmSensitiveTool: approveOnce,
+});
 ```
 
-注册检查会递归定位：
+`confirmSensitiveTool` 收到的请求为：
 
-- 根 `type` 不是 `object`；
-- 未知 `type`；
-- `properties` 或字段子 Schema 不是对象；
-- `required` 不是字符串数组；
-- `additionalProperties` 不是布尔值；
-- 数组 `items` 不是单个 Schema 对象；
-- `minLength` 为负数、非整数，或用在非字符串类型上；
-- `minimum` / `maximum` 不是有限数、用在非数值类型上，或范围颠倒；
-- `enum` 不是非空数组。
-
-这类失败发生在工具对模型可见之前，避免一个永远无法可靠执行的坏声明进入 Loop。
-
-## 5. 参数校验顺序与根值规则
-
-注册完成后，每次模型调用按以下顺序处理：
-
-1. **解析 JSON**：语法错误直接返回 `INVALID_JSON`。
-2. **校验枚举**：当前节点声明 `enum` 时先检查允许值。
-3. **校验当前节点类型**：根节点也从这里开始，因此根 `null`、数组、字符串、数值和布尔值都不能冒充工具要求的对象。
-4. **校验当前节点约束**：字符串检查 `minLength`，数值依次检查 `minimum`、`maximum`。
-5. **递归数组**：有 `items` 时按索引逐项进入子 Schema。
-6. **校验对象结构**：依次检查 `required`、额外字段和已声明字段；字段子 Schema 继续递归。
-7. **全部通过后才调用 execute**：校验器只返回第一条可读错误，不做参数转换。
-
-空 `arguments: ''` 继续按 D014 契约变为 `{}`；如果工具有必填字段，会在 Schema 阶段得到缺字段错误。根 `arguments: 'null'` 不会被改成 `{}`，而是明确报告根值期望 `object`、实际 `null`。
-
-之所以返回第一条错误，是为了兼容 D014 的错误结构和现有模型修复循环，而不是在本日引入新的批量错误协议。
-
-## 6. 错误路径与修复提示
-
-数组索引用 `[n]`，对象字段用 `.field`，根节点用 `$`。例如：
-
-```json
+```ts
 {
-  "profile": { "name": "Ada", "age": 20 },
-  "tags": [],
-  "members": [{ "name": "Grace" }, { "name": 9 }]
+  callId: 'call-042',
+  toolName: 'write_file',
+  args: { path: 'note.txt', content: 'hello' }, // 已通过 Schema 校验
+  tenantId: 'tenant-a',                        // 有租户策略时才出现
 }
 ```
 
-返回：
+确认结果必须严格为 `true` 才批准。`false`、`undefined`、其他真值都不是明确批准。
+
+### 3.3 白名单的默认值不是空数组
+
+| `allowedTools` | 含义 |
+| --- | --- |
+| 省略 / `undefined` | 不启用白名单，保持 D028 兼容；仍受租户与敏感确认约束 |
+| `['read_file']` | 只有名为 `read_file` 的工具可能可见、可执行 |
+| `[]` | 显式禁止所有工具 |
+
+白名单和租户是 **AND** 关系：工具必须同时通过两项检查。白名单包含某工具，不会让其他租户的工具变得可见。
+
+### 3.4 租户的默认值不是“全部租户”
+
+| Registry 租户策略 | 未声明租户的工具 | 声明 `tenant-a` | 声明 `tenant-b` |
+| --- | --- | --- | --- |
+| 未配置 | 可见、可按其他策略执行 | 不可见、不可执行 | 不可见、不可执行 |
+| `tenant-a` | 可见、可按其他策略执行 | 可见、可按其他策略执行 | 不可见、不可执行 |
+| `tenant-b` | 可见、可按其他策略执行 | 不可见、不可执行 | 可见、可按其他策略执行 |
+
+没有通配符租户，也没有“未配置就全开”的捷径。
+
+`list()`、`discover()`、`describe()` 和 `size` 只反映当前策略可见工具；`UNKNOWN_TOOL` 的候选提示也只使用这份可见集合。直接猜测隐藏工具名只会得到通用 `TOOL_NOT_ALLOWED`，不会得到其 Schema、参数错误、租户列表或确认配置。
+
+工具实际收到的 `ToolContext.tenantId` 由 Registry 策略写入。Registry 会忽略调用方自行传入的租户值，不能用下面的方式越权：
+
+```ts
+// registry 绑定 tenant-a；传入 tenant-b 不会改变实际主体。
+await registry.execute(call, {
+  workspaceRoot: '.',
+  tenantId: 'tenant-b',
+});
+```
+
+---
+
+## 四、完整校验顺序
+
+`Registry.execute` 的顺序是权限设计的一部分：
+
+```text
+收到 ToolCall
+  ↓
+1. 注册表查找：不存在 → UNKNOWN_TOOL
+  ↓
+2. 白名单 + 租户授权：不通过 → TOOL_NOT_ALLOWED
+  ↓
+3. JSON.parse：失败 → INVALID_JSON
+  ↓
+4. Schema 校验：失败 → INVALID_ARGUMENTS
+  ↓
+5. 敏感工具逐次确认：未批准 / 回调失败 → 标准 ToolError
+  ↓
+6. tool.execute(args, trustedContext)
+  ↓
+业务 ToolError → ToolResult，Loop 回喂模型
+```
+
+### 4.1 为什么授权在 JSON / Schema 之前
+
+如果先校验隐藏工具的参数，调用方就能通过不同错误探测：
+
+- 工具是否真的存在；
+- 某个字段是否必填；
+- 字段类型与 Schema 细节；
+- 工具是否被标记为敏感。
+
+所以未授权请求即使带有畸形 JSON，也只会得到 `TOOL_NOT_ALLOWED`，不会进入解析、Schema 或确认回调。
+
+### 4.2 为什么确认在 JSON / Schema 之后
+
+确认请求需要呈现有意义的操作内容。畸形 JSON 或错误参数不应该触发用户确认，更不应该以“用户同意过”为由绕过 D028。
+
+因此顺序不是“所有权限都最早”，而是：
+
+- **访问授权尽量早**，避免信息泄露；
+- **操作确认足够晚**，确保批准的是合法、明确的参数；
+- **两者都必须早于 `execute`**。
+
+---
+
+## 五、确认语义与错误结果
+
+### 5.1 每次执行都重新确认
+
+批准不会写入全局布尔值，也不会按工具名缓存：
+
+```text
+call-first  → confirm(call-first)  = true  → 执行一次
+call-second → confirm(call-second) = false → 拒绝
+```
+
+即使工具名和参数相同，第二次执行仍会调用确认回调。即使调用方重试同一个 `toolCallId`，Registry 也不会复用上一次回调结果。
+
+宿主可以在回调之外实现自身审批流程，但不能把 Registry 当成永久批准存储。
+
+### 5.2 标准错误码
+
+| 错误码 | 触发位置 | retryable | 回喂原则 |
+| --- | --- | --- | --- |
+| `UNKNOWN_TOOL` | 注册表查找 | `true` | 只提示当前可见工具 |
+| `TOOL_NOT_ALLOWED` | 白名单 / 租户 | `false` | 通用拒绝，不附隐藏 Schema 或租户信息 |
+| `INVALID_JSON` | JSON 解析 | `true` | 沿用 D028，可修正 arguments |
+| `INVALID_ARGUMENTS` | Schema 校验 | `true` | 沿用 D028，定位可见工具的具体字段 |
+| `TOOL_CONFIRMATION_REQUIRED` | 无回调、回调拒绝或非 `true` | `false` | 本次未获明确确认，不执行 |
+| `TOOL_CONFIRMATION_FAILED` | 回调抛错 / Promise reject | `false` | 不回传回调异常、密钥或后端细节 |
+
+权限拒绝示意：
 
 ```json
 {
+  "content": "工具执行失败：当前策略不允许调用该工具",
   "isError": true,
   "error": {
-    "code": "INVALID_ARGUMENTS",
-    "message": "参数校验失败：$.members[1].name，期望 string，实际为 number",
-    "hint": "请修正 $.members[1].name（期望 string）后重试工具调用。",
-    "retryable": true
+    "code": "TOOL_NOT_ALLOWED",
+    "message": "当前策略不允许调用该工具",
+    "retryable": false,
+    "hint": "请改用当前策略可见且允许的工具"
   }
 }
 ```
 
-这条结果可以原样回喂，模型无需猜测究竟是哪一项出错。常见修复信息包括：
+Loop 仍按 D026 的方式把它序列化为 `role: 'tool'` 消息，并保留原 `toolCallId`。下一轮模型可以放弃、解释或选择已授权工具；Loop 不需要了解权限细节，也不会因拒绝而崩溃。
 
-| 输入问题 | 路径示例 | 修复方向 |
-| --- | --- | --- |
-| 缺少对象内必填字段 | `$.profile.name` | 补上该字段 |
-| 数组元素类型错误 | `$.tags[1]` | 把第 2 项改为字符串 |
-| 数组内对象字段错误 | `$.members[1].name` | 修正对应成员字段 |
-| 字符串太短 | `$.profile.name` | 满足 `长度 >= 1` |
-| 数值越界 | `$.profile.age` | 满足 `>= 0` 或 `<= 150` |
-| 不允许的额外字段 | `$.members[0].extra` | 删除字段，只保留声明字段 |
+---
 
-## 7. 内置工具如何接入
+## 六、默认行为与兼容性
 
-现有工具不更换执行函数，只补充声明：
-
-- `read_file`、`list_dir`、`write_file`、`edit_file` 的 `path` 增加 `minLength: 1`；
-- `edit_file.oldText` 增加 `minLength: 1`，`newText` 仍允许空字符串；
-- `run_command.command` 增加 `minLength: 1`；
-- `run_command.timeoutMs` 声明 `minimum: 1`、`maximum: 30000`。
-
-因此空命令和超出范围的超时会在进程创建之前被 Registry 拒绝。工具内部仍保留原有的领域检查，例如空白命令、路径边界、精确文本匹配和超时执行；直接调用工具函数的旧测试与公共行为不被绕过。
-
-## 8. 如何证明 execute 没有运行
-
-`test/d028-schema-validation.test.ts` 注册了一个真实 Registry 工具，但把 `execute` 换成 Vitest 间谍：
+### 6.1 不传策略的旧代码
 
 ```ts
-const execute = vi.fn((args: unknown) =>
-  Promise.resolve({ content: JSON.stringify(args) }),
-);
-registry.register({ name: 'spy', description: '记录合法入参', parameters, execute });
+const registry = new ToolRegistry();
+registry.register(tool); // 未声明 tenantId / sensitive
+
+registry.list();
+await registry.execute(call, { workspaceRoot: '.' });
 ```
 
-测试对每类非法输入都同时断言：
+这与 D028 相同：工具可发现，JSON / Schema 校验不变，业务异常仍规范化为 `ToolResult`。`runAgentLoop`、CLI、持久化 Runner 和 `createBuiltinTools` 都无须修改。
+
+需要注意：新声明的租户工具或敏感工具本来就不是旧代码。对它们故意采用失败关闭：
+
+- 没配置对应租户 → 拒绝租户工具；
+- 没配置确认回调 → 拒绝敏感工具。
+
+### 6.2 内置工具不会自动变成敏感工具
+
+为了保留现有离线 Demo 与公共 API，本日没有给 `write_file`、`edit_file` 或 `run_command` 暗中追加全局确认。宿主如果认为某次部署中的某个内置工具敏感，应在注册时明确写出：
 
 ```ts
-expect(result.error?.code).toBe('INVALID_ARGUMENTS');
-expect(result.error?.message).toContain(expectedPath);
-expect(result.error?.hint).toContain(`请修正 ${expectedPath}`);
-expect(execute).not.toHaveBeenCalled();
+registry.register(runCommand, {
+  sensitive: true,
+  metadata: { risk: 'shell' },
+});
 ```
 
-覆盖的非法输入包括根值、嵌套必填字段、对象类型、数组类型、数组元素、数组内对象、字符串长度、整数类型、数值上下界和额外字段。另一个合法用例断言：
+这样默认兼容与部署方的风险分类不会互相偷换。
 
-```ts
-expect(execute).toHaveBeenCalledOnce();
-expect(execute).toHaveBeenCalledWith(args, { workspaceRoot: '.' });
-```
+### 6.3 管理面与执行面
 
-所以测试不是只证明“校验器会拒绝”，还证明了边界两侧的完整行为：**非法值零执行，合法值不丢字段、不改结构地执行一次。**
+策略过滤的是发现与执行，不替宿主管理注册表生命周期。`replace` 会按新注册项重新声明租户 / 敏感级别；宿主必须在热切换时重新提供这些选项，不能依赖旧项自动继承。
 
-针对 `run_command`，测试同样使用间谍执行器验证空命令、`timeoutMs: 0` 和 `timeoutMs: 30001` 均在 spawn 之前停止；全部五个内置工具则逐一通过新的注册期检查。
+---
 
-## 9. TDD 与测试
+## 七、TDD 与验证
 
-本日先写行为测试并运行 RED，观察到数组、约束和注册期声明尚未被处理；随后扩展实现，目标测试转 GREEN，再跑全量回归。
+### 7.1 RED → GREEN
+
+先在 `test/d029-permissions.test.ts` 编写期望 API 与行为，再运行：
 
 ```bash
-# 目标测试
-npm test -- test/d028-schema-validation.test.ts test/errors.test.ts
+npm test -- test/d029-permissions.test.ts
+```
 
-# 全量回归：34 个测试文件，286 个测试
-npm test
+D028 基线上实际观察到失败：白名单被忽略、跨租户工具仍执行、敏感工具未经确认执行、Loop 收到执行结果而非拒绝。确认顺序用例还加入合法调用对照，避免它仅因“根本没有确认功能”而假通过。
 
-# lint + typecheck + 全量测试
+随后实现最小权限层，同一测试转为全绿。
+
+### 7.2 覆盖场景
+
+- 白名单内工具通过，白名单外工具发现与执行均被拒绝；
+- 未授权畸形 JSON 不触发 JSON / Schema 探测；
+- 当前租户、共享工具与其他租户的发现 / 执行边界；
+- 未配置租户时不默认开放租户工具；
+- 调用方伪造 `ToolContext.tenantId` 不能提权；
+- 敏感工具批准、拒绝、缺少回调、回调异常、逐次重新确认；
+- 参数错误不触发确认，所有拒绝路径均不调用 `execute`；
+- 确认后端异常不会进入模型可见内容；
+- Loop 将权限拒绝回喂并继续完成；
+- D027 元数据 / 热切换、D028 JSON / Schema、标准错误与离线 Demo 回归。
+
+### 7.3 命令
+
+```bash
+# 新行为与关键兼容回归
+npm test -- test/d029-permissions.test.ts \
+  test/d027-tool-registry.test.ts \
+  test/d028-schema-validation.test.ts \
+  test/loop.test.ts test/errors.test.ts \
+  test/d025-offline-demo.test.ts
+
+# 全量质量门
 npm run check
-
-# 覆盖率门槛
 npm run test:coverage
+
+# 无权限配置的 G1 离线演示仍可直接运行
+node --experimental-strip-types src/demo/g1.ts
 ```
 
-D028 新文件包含 35 个测试；D014 原有的“忽略 `minLength`”边界测试更新为“支持 `minLength`，其他未知关键字仍忽略”，明确记录本次能力提升。
+本分支在 Node.js `v24.19.0` 下的实际验收结果：
 
-重点测试组：
+- `npm run check`：Lint、TypeScript、35 个测试文件共 296 个测试全部通过；
+- `npm run test:coverage`：语句 `94.62%`、分支 `90.38%`、函数 `99.47%`、行 `95.42%`；
+- `src/tools/registry.ts`：语句 `98.57%`、分支 `98.63%`、函数 `100%`、行 `98.50%`；
+- `npm run demo:g1`：无权限策略的真实离线修复闭环通过。
 
-- `D028 参数在执行前校验`：间谍零调用与合法调用对照；
-- `D028 validateArguments 递归与约束`：数组索引、null、Unicode 长度和数值边界；
-- `D028 注册期 Schema 校验`：非法声明路径、replace 原子性、内置工具声明。
+---
 
-## 10. 兼容性与边界
+## 八、限制与 D030 衔接
 
-### 保持不变
+本日刻意保持边界小而真实：
 
-- Node.js 24、原生 TypeScript、ESM、Vitest，运行时依赖仍为 0；
-- `Tool`、`ToolSchema`、`ToolResult`、`ToolRegistry` 的公开调用方式；
-- D027 的 register / unregister / replace、版本与元数据、确定性列表和异常回喂；
-- D014 的 `INVALID_JSON` / `INVALID_ARGUMENTS` 错误码及可重试语义；
-- 模型侧普通 JSON Schema 格式；
-- Schema 校验失败不抛出到 Loop，而是返回模型可修正结果。
+1. **一个 Registry 一个主体**：没有进程内多租户会话池，宿主负责绑定实例与身份。
+2. **没有确认超时器**：永不 resolve 的回调会让调用一直等待；宿主应在自己的确认端口实现超时并拒绝。
+3. **没有审批 UI**：回调只是宿主集成点，不规定终端、桌面或远程审批方式。
+4. **没有自动风险分类**：是否敏感由注册者声明，默认旧工具不会突然被锁定。
+5. **没有权限审计持久化**：标准错误已能回喂，但尚未形成独立审计日志或指标。
+6. **不是恶意进程沙箱**：工具自身业务校验、工作区边界与进程隔离仍是不同层次。
 
-### 有意收紧
-
-- 以前缺少根 `type: object` 或使用未知类型的工具可能被注册；现在会在注册期得到明确 `TypeError`。这是非法声明的 fail-fast，不是模型运行期 API 破坏。
-- `replace` 遇到非法新 Schema 时保留旧工具，而不是写入半成品。
-
-### Schema 不负责什么
-
-Schema 只证明“值的形状与声明约束满足”，不证明业务操作一定成功。例如文件是否存在、文本是否唯一匹配、命令是否退出非零，仍是工具执行期的领域结果。
-
-`run_command` 的 `cwd` 是工作区根目录，不是容器、seccomp 或系统调用沙箱；路径越界检查也不是命令沙箱。D028 没有把 Schema 校验包装成安全边界。
-
-## 11. 与 D029 的衔接
-
-D029 应在这一层之后增加权限策略，而不是把权限塞进 JSON Schema：
-
-```text
-JSON 解析
-  → Schema 形状/约束校验（D028）
-  → 工具权限与操作策略（D029）
-  → execute
-  → 持久化结果与恢复
-```
-
-建议 D029 复用当前 Registry 的统一入口，让“Schema 合法但权限不足”和“Schema 本身非法”使用不同错误码与修复提示。路径读写范围、命令允许列表、网络/进程能力和高风险操作确认应在权限层判断；即使调用者绕过模型，也仍需执行层保留防御。
-
-本日没有实现权限、重试或熔断，它们分别属于后续任务，不在 D028 扩散范围。
+D030 可以在不移动本日安全顺序的前提下继续增强运行保障，例如记录授权 / 确认决策、补充超时与审计，或处理执行后的可靠性问题。后续改动必须保持两条底线：**未授权不能借校验顺序探测信息，任何失败路径都不能跳过本次确认直接进入 `execute`。**

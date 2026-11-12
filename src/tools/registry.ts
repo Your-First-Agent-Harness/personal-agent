@@ -8,6 +8,29 @@ export type ToolMetadata = Readonly<Record<string, unknown>>;
 export interface ToolRegistrationOptions {
   readonly version?: string;
   readonly metadata?: ToolMetadata;
+  /** 未声明表示共享工具；声明后仅精确匹配的租户策略可见、可执行 */
+  readonly tenantId?: string;
+  /** 敏感工具每次执行前都必须通过本次调用的确认回调 */
+  readonly sensitive?: boolean;
+}
+
+export interface ToolConfirmationRequest {
+  readonly callId: string;
+  readonly toolName: string;
+  readonly args: unknown;
+  readonly tenantId?: string;
+}
+
+export type SensitiveToolConfirmation = (
+  request: ToolConfirmationRequest,
+) => boolean | Promise<boolean>;
+
+export interface ToolRegistryPolicy {
+  /** undefined 保持 D028 的全量共享工具兼容；数组（包括空数组）表示显式白名单 */
+  readonly allowedTools?: readonly string[];
+  /** 一个 Registry 只代表一个租户主体，不用调用参数覆盖 */
+  readonly tenantId?: string;
+  readonly confirmSensitiveTool?: SensitiveToolConfirmation;
 }
 
 export interface ToolDescriptor extends ToolSchema {
@@ -19,6 +42,8 @@ interface RegistryEntry {
   readonly tool: Tool;
   readonly version: string;
   readonly metadata: ToolMetadata;
+  readonly tenantId?: string;
+  readonly sensitive: boolean;
 }
 
 function createEntry(tool: Tool, options: ToolRegistrationOptions): RegistryEntry {
@@ -51,7 +76,13 @@ function createEntry(tool: Tool, options: ToolRegistrationOptions): RegistryEntr
   if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) {
     throw new TypeError('非法工具注册：metadata 必须是对象');
   }
-  return { tool, version, metadata };
+  return {
+    tool,
+    version,
+    metadata,
+    ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
+    sensitive: options.sensitive === true,
+  };
 }
 
 function describeEntry(entry: RegistryEntry): ToolDescriptor {
@@ -66,6 +97,22 @@ function describeEntry(entry: RegistryEntry): ToolDescriptor {
 
 export class ToolRegistry {
   private readonly tools = new Map<string, RegistryEntry>();
+  private readonly policy: ToolRegistryPolicy;
+
+  constructor(policy: ToolRegistryPolicy = {}) {
+    this.policy = policy;
+  }
+
+  private isVisible(entry: RegistryEntry): boolean {
+    const inTenant = entry.tenantId === undefined || entry.tenantId === this.policy.tenantId;
+    const inWhitelist = this.policy.allowedTools === undefined
+      || this.policy.allowedTools.includes(entry.tool.name);
+    return inTenant && inWhitelist;
+  }
+
+  private visibleEntries(): RegistryEntry[] {
+    return [...this.tools.values()].filter((entry) => this.isVisible(entry));
+  }
 
   register(tool: Tool, options: ToolRegistrationOptions = {}): void {
     const entry = createEntry(tool, options);
@@ -87,9 +134,9 @@ export class ToolRegistry {
     return this.tools.delete(name);
   }
 
-  /** 发给模型的 Schema 列表，顺序稳定，方便对比两次请求的 diff */
+  /** 发给模型的 Schema 列表，仅包含当前策略可见工具，顺序稳定 */
   list(): ToolSchema[] {
-    return [...this.tools.values()].map(({ tool }) => ({
+    return this.visibleEntries().map(({ tool }) => ({
       name: tool.name,
       description: tool.description,
       parameters: tool.parameters,
@@ -98,16 +145,16 @@ export class ToolRegistry {
 
   /** 给调用方看的完整注册信息，不混入模型请求的 Schema。 */
   discover(): ToolDescriptor[] {
-    return [...this.tools.values()].map(describeEntry);
+    return this.visibleEntries().map(describeEntry);
   }
 
   describe(name: string): ToolDescriptor | undefined {
     const entry = this.tools.get(name);
-    return entry === undefined ? undefined : describeEntry(entry);
+    return entry === undefined || !this.isVisible(entry) ? undefined : describeEntry(entry);
   }
 
   get size(): number {
-    return this.tools.size;
+    return this.visibleEntries().length;
   }
 
   /**
@@ -118,8 +165,16 @@ export class ToolRegistry {
   async execute(call: ToolCall, context: ToolContext): Promise<ToolResult> {
     const entry = this.tools.get(call.name);
     if (entry === undefined) {
-      const available = [...this.tools.keys()].join(', ');
+      const available = this.visibleEntries().map(({ tool }) => tool.name).join(', ');
       return toolError('UNKNOWN_TOOL', `未知工具：${call.name}`, true, `请改用已注册工具：${available}`);
+    }
+    if (!this.isVisible(entry)) {
+      return toolError(
+        'TOOL_NOT_ALLOWED',
+        '当前策略不允许调用该工具',
+        false,
+        '请改用当前策略可见且允许的工具',
+      );
     }
     const { tool } = entry;
 
@@ -145,8 +200,49 @@ export class ToolRegistry {
       );
     }
 
+    if (entry.sensitive) {
+      const confirm = this.policy.confirmSensitiveTool;
+      if (confirm === undefined) {
+        return toolError(
+          'TOOL_CONFIRMATION_REQUIRED',
+          '敏感工具调用未获得本次明确确认',
+          false,
+          '请由调用方针对本次 toolCallId 确认后重新发起调用',
+        );
+      }
+      let approved: boolean;
+      try {
+        approved = await confirm({
+          callId: call.id,
+          toolName: call.name,
+          args,
+          ...(this.policy.tenantId === undefined ? {} : { tenantId: this.policy.tenantId }),
+        });
+      } catch {
+        return toolError(
+          'TOOL_CONFIRMATION_FAILED',
+          '敏感工具确认失败，本次调用已安全拒绝',
+          false,
+          '请检查调用方确认回调后重新发起调用',
+        );
+      }
+      if (approved !== true) {
+        return toolError(
+          'TOOL_CONFIRMATION_REQUIRED',
+          '敏感工具调用未获得本次明确确认',
+          false,
+          '请由调用方针对本次 toolCallId 确认后重新发起调用',
+        );
+      }
+    }
+
+    const executionContext: ToolContext = {
+      workspaceRoot: context.workspaceRoot,
+      ...(context.signal === undefined ? {} : { signal: context.signal }),
+      ...(this.policy.tenantId === undefined ? {} : { tenantId: this.policy.tenantId }),
+    };
     try {
-      return await tool.execute(args, context);
+      return await tool.execute(args, executionContext);
     } catch (error) {
       return errorResult(normalizeError(error));
     }

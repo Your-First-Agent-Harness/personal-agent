@@ -15,12 +15,17 @@ export interface ToolSchema {
 export interface ToolContext {
   readonly workspaceRoot: string;
   readonly signal?: AbortSignal;
+  /** 由 Registry 的租户策略写入，调用方不能直接借此越权 */
+  readonly tenantId?: string;
 }
 
 export type ToolErrorCode =
   | 'UNKNOWN_TOOL'
   | 'INVALID_JSON'
   | 'INVALID_ARGUMENTS'
+  | 'TOOL_NOT_ALLOWED'
+  | 'TOOL_CONFIRMATION_REQUIRED'
+  | 'TOOL_CONFIRMATION_FAILED'
   | 'PATH_OUTSIDE_WORKSPACE'
   | 'FILE_NOT_FOUND'
   | 'NOT_A_FILE'
