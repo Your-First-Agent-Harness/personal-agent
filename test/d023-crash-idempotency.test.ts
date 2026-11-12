@@ -174,8 +174,8 @@ afterEach(async () => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-describe('D023 真实 SIGKILL 幂等恢复', () => {
-  for (let iteration = 1; iteration <= 5; iteration += 1) {
+describe('D024 真实 SIGKILL 幂等恢复', () => {
+  for (let iteration = 1; iteration <= 10; iteration += 1) {
     it(`第 ${iteration} 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具`, async () => {
       const context: FixtureContext = {
         databasePath: join(directory, 'crash.sqlite'),

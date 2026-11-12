@@ -20,6 +20,29 @@ function databasePath(): string {
   return join(directory, 'agent.sqlite');
 }
 
+function overwriteResultJson(runId: string, value: string): void {
+  const database = new DatabaseSync(databasePath());
+  try {
+    const updated = database
+      .prepare('UPDATE runs SET result_json = ? WHERE id = ?')
+      .run(value, runId);
+    expect(updated.changes).toBe(1);
+  } finally {
+    database.close();
+  }
+}
+
+function resultJson(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    messages: [{ role: 'user', content: '请求' }],
+    text: '回答',
+    turns: 1,
+    stopReason: 'completed',
+    usage: { inputTokens: 3, outputTokens: 4 },
+    ...overrides,
+  });
+}
+
 function closeStores(): void {
   for (const store of stores) {
     store.close();
@@ -270,5 +293,28 @@ describe('SqliteRunStore D023 持久化', () => {
       userMessage: '旧库新请求',
       result,
     });
+  });
+
+  it.each([
+    ['JSON 语法损坏', '{not-json'],
+    ['非对象', 'null'],
+    ['缺少 usage', resultJson({ usage: undefined })],
+    ['messages 不是数组', resultJson({ messages: {} })],
+    ['工具调用缺少 arguments', resultJson({
+      messages: [{ role: 'assistant', content: '', toolCalls: [{ id: 'call-1', name: 'record' }] }],
+    })],
+    ['turns 不是非负整数', resultJson({ turns: 0.5 })],
+    ['stopReason 非法', resultJson({ stopReason: 'done' })],
+    ['usage 字段缺失', resultJson({ usage: { inputTokens: 3 } })],
+  ])('拒绝损坏的 result_json：%s', async (_label, corruptedResult) => {
+    const { RunStoreError, SqliteRunStore } = await import('../src/memory/run-store.ts');
+    const store = new SqliteRunStore(databasePath());
+    stores.push(store);
+    store.start({ id: 'corrupted-run', sessionId: 'corrupted-session', userMessage: '请求' });
+    store.finish('corrupted-run', 'completed', JSON.parse(resultJson()) as AgentLoopResult);
+    overwriteResultJson('corrupted-run', corruptedResult);
+
+    expect(() => store.get('corrupted-run')).toThrow(RunStoreError);
+    expect(() => store.get('corrupted-run')).toThrow(/完成结果数据损坏/);
   });
 });

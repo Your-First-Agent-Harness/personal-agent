@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { runCommandTool } from '../src/tools/run-command.ts';
 
@@ -30,16 +30,23 @@ function expectProcessExited(pid: number): void {
 }
 
 async function waitForPid(root: string): Promise<number> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  const deadline = process.hrtime.bigint() + 7_000_000_000n;
+  while (process.hrtime.bigint() < deadline) {
     if (existsSync(join(root, 'child.pid'))) {
-      return Number(readFileSync(join(root, 'child.pid'), 'utf8'));
+      const pid = Number(readFileSync(join(root, 'child.pid'), 'utf8'));
+      if (Number.isInteger(pid) && pid > 0) {
+        return pid;
+      }
     }
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
   }
-  throw new Error('子进程未启动');
+  throw new Error('子进程未写出 ready PID 握手');
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   while (dirs.length > 0) {
     const dir = dirs.pop();
     if (dir !== undefined) {
@@ -82,22 +89,29 @@ describe('run_command', () => {
     expect(payload).toMatchObject({ exitCode: 7, timedOut: false, cancelled: false });
   });
 
-  it('超时终止长命令并回传 timedOut 错误结果', async () => {
+  it('子进程 ready 后超时，终止长命令并保留已产生的 stdout', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
     const root = workspace();
     const command = nodeCommand(
-      "require('node:fs').writeFileSync('child.pid',String(process.pid));setTimeout(()=>{},5000)",
+      "process.stdout.write('ready');require('node:fs').writeFileSync('child.pid',String(process.pid));setTimeout(()=>{},5000)",
     );
 
-    const result = await runCommandTool.execute(
+    const running = runCommandTool.execute(
       { command, timeoutMs: 50 },
       { workspaceRoot: root },
     );
+    const pid = await waitForPid(root);
+    await vi.advanceTimersByTimeAsync(50);
+    const result = await running;
     const payload = JSON.parse(result.content) as Record<string, unknown>;
-    const pid = Number(readFileSync(join(root, 'child.pid'), 'utf8'));
 
     expectProcessExited(pid);
     expect(result.isError).toBe(true);
-    expect(payload).toMatchObject({ timedOut: true, cancelled: false });
+    expect(payload).toMatchObject({
+      stdout: 'ready',
+      timedOut: true,
+      cancelled: false,
+    });
   });
 
   it('stdout 保留最多 8000 个原字符并明确标注截断', async () => {

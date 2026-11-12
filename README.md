@@ -1,183 +1,187 @@
-# Personal Agent D023：崩溃恢复与可验证幂等
+# Personal Agent · D024 可靠性修复与复审
 
-> 日期：2026-12-03 · 分支：`D023` · 前置：`D022`
->
-> 目标：同一个 `sessionId + runId + userMessage` 的已完成请求可以重复提交，但 Provider、工具和用户消息写入都不能再次执行；冲突输入必须拒绝；中断运行不能伪装成已完成。
+> 计划日期：2026-12-04
+> 日分支：`D024`
+> 基线：`D023` / `ef0cad7`
+> 任务：D24「可靠性修复：对齐任务卡的可靠性要求」
 
-## 1. 今天要解决的问题
+本日只做可靠性审计、可证明的最小修复、进程测试加固和安装文档。没有合并 `main`，没有执行 D025，也没有发布 npm / GitHub release。
 
-D022 已经具备 SQLite Session/Run 持久化、启动时把 `running` 恢复为 `interrupted`，以及真实 SIGKILL 后由第二个进程读取事实的能力。但它还不是幂等执行：
+## 1. 从安装到验证
 
-1. `PersistentAgentService.run()` 先追加用户消息，再尝试插入 run；
-2. 重复 runId 会先改变 Session，随后才撞 `runs.id` 主键；
-3. run 只保存状态，不保存原始输入和完成结果；
-4. 因而重复已完成请求无法返回原结果，冲突输入和中断重提也没有清晰边界。
+第一次接触仓库时，先读 **[安装与本地打包验证](docs/install.md)**。文档包含：
 
-D023 不把“数据库还在”误当成“请求可以安全重放”。今天只补幂等契约及其真实进程证据，不做 D024。
+- Node.js 24 准备、克隆与分支切换、按锁文件执行 `npm ci`；
+- 仅含占位符的配置示例，以及不需要模型密钥的检查方式；
+- `npm run check`、`npm run test:coverage`；
+- `npm pack`、干净临时目录安装 tarball、包元数据与原生 SQLite 冒烟；
+- 旧 Node.js 的 `node:sqlite` 模块、实验开关和路径问题。
 
-## 2. 从 D022 继续
+源码开发的最小命令：
 
 ```bash
-git switch D022
-git switch -c D023
 npm ci
+cp .env.example .env
+npm run check
+npm run test:coverage
 ```
 
-开始时 D022 基线测试为 **11/11 通过**。生产实现仍使用 Node 24 原生 TypeScript/ESM、`node:sqlite` 和参数化 SQL，没有新增运行时依赖。
+只有真实调用模型时才需要在本地 `.env` 填写有效密钥。本日测试和打包验证没有读取或打印真实 `.env`，也没有请求真实模型服务。
 
-## 3. RED：先证明缺陷真实存在
+## 2. 可靠性审计清单
 
-新增 `test/d023-idempotency.test.ts`，在未改生产代码时运行：
+审计范围是 D021–D023 新增的持久化与进程恢复路径，而不是泛化重构整个项目。
+
+| 检查项 | 证据与结论 | 本日处理 |
+| --- | --- | --- |
+| D021 Message 数据边界 | `session-store.ts` 已校验角色、内容、ToolCall 及位置；非法 JSON、非法结构、位置错误均显式报错 | 保留现有行为，无需修改 |
+| D021 Session 保存事务 | `save` 在同一事务内校验身份、替换消息并提交；异常路径回滚 | 回归测试通过，无需修改 |
+| D022 Run 状态与 tool-log | `addIfAbsent` 事务保护 Run 与工具日志；`start` 原子幂等；`finish` 校验状态 | 回归测试通过，无需修改 |
+| D022/D023 迁移 | D022 旧表补列测试与 D023 旧 `runs` 表补 `result_json` 测试均存在，迁移 SQL 由生产构造函数执行 | 补列迁移测试通过，无另建迁移框架 |
+| D023 `result_json` 反序列化 | 原实现只做 `JSON.parse` 后类型强转；合法 JSON 的 `null`、缺字段对象、坏 ToolCall 等会伪装成 `AgentLoopResult` | **确认缺陷并最小修复** |
+| 事务与关闭 | 定向复审 `begin/commit/rollback`、Store/Service `close`、测试临时目录清理；未发现可稳定证明的新问题 | 不为假想问题改生产代码 |
+| 进程 `error` / `exit` / `close` | 生产 `run-command.ts` 用 `close` 汇总 stdio，`finish` 只完成一次，并清理 timeout 与 abort listener | 生产行为不变，加固测试握手 |
+| D022/D023 子进程夹具 | 复用 PID ready、存活定时器、进程退出及 `stopChild` 清理；SIGKILL 后不能残留只写工具日志的进程 | 沿用现有夹具，不复制新框架 |
+
+### 本日修复的持久化边界
+
+`src/memory/run-store.ts` 现在只有完成 Run 的 `result` 非空时才解析 `result_json`，并在返回前验证：
+
+- 顶层必须是对象，`messages` 必须是合法 Message 数组；
+- Message 的角色、文本、ToolCall `id/name/arguments`、可选工具字段必须符合类型；
+- `text` 必须是字符串，`turns` 必须是非负整数；
+- `stopReason` 必须属于既有停止原因；
+- `usage.inputTokens/outputTokens` 必须是非负整数。
+
+语法损坏或结构损坏都抛出 `RunStoreError('Run 完成结果数据损坏')`。本日只拒绝坏数据，不自动修复、丢弃或改写历史 Run。
+
+## 3. RED → GREEN 证据
+
+### RED：先证明反序列化缺陷
+
+在未修改生产代码时，先向 `test/d023-idempotency.test.ts` 加入 7 类“JSON 合法、结构非法”的 `result_json`：
+
+1. 顶层 `null`；
+2. 缺少 `usage`；
+3. `messages` 不是数组；
+4. ToolCall 缺少 `arguments`；
+5. `turns` 为小数；
+6. 非法 `stopReason`；
+7. `usage` 缺少字段。
+
+执行：
 
 ```bash
 npm test -- test/d023-idempotency.test.ts
 ```
 
-首次结果为 **4 项全部失败**，不是编译错误或人为制造的失败：
+7 个新增用例全部按预期 RED：测试期望 `RunStoreError`，原实现却没有抛错并返回了损坏记录。这证明测试击中了缺陷，而不是拼写或夹具错误。
 
-| RED 场景 | 观察到的缺陷 |
-| --- | --- |
-| 重开后重复 completed 请求 | `UNIQUE constraint failed: runs.id`，没有返回原结果 |
-| 同 runId 改 userMessage | 错误是主键冲突，不是明确“冲突”；新用户消息已被追加 |
-| 同 runId 改 sessionId | 新 Session 已写入，原请求没有受到完整保护 |
-| interrupted 重提 | 没有中断专用拒绝，且用户消息被重复追加 |
-| D022 旧表保存完成结果 | `userMessage` 和 `result` 均未持久化 |
+另补的“JSON 语法损坏”用例覆盖原有 catch 防线；它属于现有行为的回归测试，首次通过，不人为制造 RED。
 
-其中冲突用例一次覆盖两种输入变化，所以测试总数是 4，而不是 5。
+### GREEN：只修改必要的生产文件
 
-随后只修改生产实现，再运行同一命令，结果为 **4/4 通过**。D021—D023 定向回归合计 **24/24 通过**。
+增加结构类型守卫后，定向执行持久化与恢复测试，再执行全量测试：
 
-五次 SIGKILL 测试是在上述单元 RED→GREEN 之后增加的进程级回归验证，首次运行为 **5/5 通过**；它是真实验证证据，但不冒充 RED 证据。
+```bash
+npm test -- test/d023-idempotency.test.ts \
+  test/d022-persistent-runner.test.ts \
+  test/d022-run-store.test.ts test/d021-session-store.test.ts
+```
 
-## 4. D023 幂等契约
+损坏数据用例转为 GREEN，D021–D023 原有幂等、迁移、恢复、事务和消息校验测试保持通过。没有为覆盖率增加生产分支，也没有改动 `src/tools/run-command.ts`。
 
-### 4.1 请求身份
+## 4. 50ms 超时竞态：根因与确定性修复
 
-服务以 runId 查找既有记录，并比较 `sessionId` 和 `userMessage`：
+### 根因
 
-| 既有记录与请求 | 行为 |
-| --- | --- |
-| runId 不存在 | 正常创建 running，执行 Loop |
-| completed，sessionId/userMessage 相同 | 返回持久化的原完成结果 |
-| 任意状态，sessionId 或 userMessage 不同 | 抛出包含“冲突”的 `RunStoreError` |
-| interrupted，输入相同 | 明确提示已中断，不执行 Provider/工具 |
-| running 或 failed，输入相同 | 明确拒绝重复执行 |
-| completed 但缺完成结果或 Session | 拒绝，不猜测、不重放 |
+旧测试让生产代码在 `spawn` 时启动 50ms timeout，同时依赖子进程启动后写入 `child.pid`。并行或高负载下，Node 子进程可能尚未完成初始化，timeout 已触发；此时读取 PID、假设 ready 或期待已经产生的 stdout 都处于竞态窗口中。
 
-只有“输入一致的 durable completed”是读取快捷路径。其他已有 runId 都不会进入 Loop。
+生产实现已经在子进程 `close` 时收集 stdio，并统一清理 timeout。证据指向测试的启动时序假设，因此只修 `test/run-command.test.ts`。
 
-重复 completed 时，以下行为均被测试锁定：
+### 确定性握手
 
-- Provider 调用次数不增加；
-- 工具副作用不增加；
-- 用户消息不重复；
-- run 数和既有 `updatedAt` 不变；
-- `messages/text/turns/stopReason/usage/run` 与首次完成结果一致。
+新测试按以下顺序执行：
 
-`maxTurns`、Provider 实例等执行选项没有序列化为请求指纹；同一三元组重复提交时直接返回原结果，不会换 Provider 再算一次。需要新输入或新执行时必须使用新 runId。省略 runId 时会生成随机 ID，不提供跨请求去重键。
+1. 仅对 `setTimeout` 使用 Vitest 假计时器；
+2. 启动真实子进程，等待有效的 `child.pid` ready 握手；
+3. PID 等待用单调时钟截止时间和 `setImmediate` 让出事件循环，不再固定 sleep 10ms 碰运气；
+4. 确认 ready 后，显式推进假计时器 50ms；
+5. 等待真实进程关闭，断言进程已退出、`timedOut: true` 且 `stdout === 'ready'`；
+6. `afterEach` 恢复真实计时器。
 
-### 4.2 中断不是完成
-
-`recover()` 只暴露 Session 与 interruptedRuns，不把工具临时状态恢复成 completed。对 interrupted 使用相同请求再次调用 `run()` 会拒绝；如需重试，必须先人工核对副作用，再用新 runId 显式发起。
-
-## 5. 持久化与事务设计
-
-### 5.1 最小新增字段
-
-`src/memory/run-store.ts` 为 runs 表增加两个可空列：
+验证结果：
 
 ```text
-user_message TEXT   -- 服务层请求的原始用户输入
-result_json  TEXT   -- AgentLoopResult：消息、文本、轮数、停止原因、用量
+定向测试：22/22 通过
+同一文件连续重复 10 轮：220/220 通过
+全量 check 与 coverage 并行运行：该文件均 22/22 通过
 ```
 
-新表直接包含这两列。打开 D022 旧数据库时，通过 `PRAGMA table_info(runs)` 检查并用固定 SQL `ALTER TABLE ... ADD COLUMN` 补齐；测试先手工建立真实 D022 表结构，再验证输入和结果可写入、关闭、重开、读回。
+## 5. 10 次真实 SIGKILL 加固
 
-所有值仍通过 `?` 参数绑定。`RunRecord` 新增可选 `userMessage` 与 `result`，直接使用这两个旧字段缺失时的安全拒绝边界，不改 D022 的 RunStore 基本状态机。
+`test/d023-crash-idempotency.test.ts` 保留原文件名以清晰展示 D023 夹具演进，测试组更新为 D024，并由 5 轮扩为 **10 轮独立真实进程测试**。
 
-### 5.2 写入顺序
+每轮都使用全新临时数据库，并完成以下链路：
 
-新运行的事务边界保持小而明确：
+1. 进程 1 初始化 Session；
+2. 进程 2 只写 `tool-log` 并靠存活定时器保持运行；
+3. 对进程 2 执行真实 `kill(child.pid, 'SIGKILL')`，断言退出 `signal === 'SIGKILL'`；
+4. 进程 3 恢复，断言没有 tool-result 残留，输出恢复前快照；
+5. 进程 4 使用同一 `runId` 重放，断言输出完全相同；
+6. 每轮分别验证 Messages、Run、`tool-log`、业务工具实际只执行一次，以及进程存活定时器已清理。
 
-1. 在任何写入前读取并处理既有 runId；
-2. SessionStore 用自己的事务保存新用户消息；
-3. RunStore 插入 running，同时保存 userMessage；
-4. Loop 执行 Provider/工具；
-5. SessionStore 用自己的事务保存最终消息；
-6. RunStore 用**同一条 UPDATE** 写入 `completed + stop_reason + result_json + updated_at`。
+不是只循环 `spawn`：每一轮都独立断言 signal、恢复状态、消息快照、Run 终态和工具日志一致性，也不靠固定短暂 sleep 判断 ready。
 
-第 6 步使 run 状态与其完成结果不会出现“一半 completed、一半没有结果”的单行更新状态。完成结果包含消息快照，所以即使之后 Session 继续追加内容，旧 run 的结果仍可从自己的 JSON 恢复。
-
-两个 Store 仍使用各自连接。**Session 保存与 Run 完成不是一个跨表事务**：如果进程恰好在第 5、6 步之间死亡，下一进程会把 running 转为 interrupted，不会返回 completed 或自动重放。恢复所需的 running→interrupted 批量更新仍由单个 SQLite 事务完成。
-
-## 6. 五次真实 SIGKILL 验证
-
-涉及文件：
-
-- `test/d023-process.ts`：可独立启动的完成、崩溃、校验进程；
-- `test/d023-crash-idempotency.test.ts`：5 个独立迭代，各自使用独立临时目录、SQLite 文件和工具日志。
-
-### 6.1 每一轮的步骤
-
-1. **complete 进程**：Provider 先调用一次本地 `record` 工具，日志追加 `complete`，再返回最终回答并正常退出；
-2. **crash 进程**：同一 Session 用新 runId 发起“崩溃请求”，先执行工具并追加 `crash`，第二次 Provider 调用时保持 pending；
-3. 工具完成后、Provider 阻塞时才发送 ready；父进程收到 ready 后执行真实 `child.kill('SIGKILL')`，并验证退出 signal；
-4. **第一个 verify 进程**：重新打开磁盘，重复 `recover()` 两次，重复 completed 请求，再重提 interrupted 请求；
-5. **第二个 verify 进程**：再做一次同样校验，完整输出必须与第一个 verify 一致。
-
-### 6.2 避免假崩溃与固定时序
-
-崩溃夹具在返回永不 settle 的 Promise 之前启动存活定时器，事件循环不会因 pending Promise 本身而自然退出。父进程只等待明确 ready，不依赖固定 50ms 等脆弱延迟；超时只作为失败保护。
-
-verify 中的 Provider 和工具都是“禁止执行”的计数替身。每轮都断言：
-
-- `providerCalls === 0`、`unexpectedToolCalls === 0`；
-- 工具日志严格为 `['complete', 'crash']`，没有第三条重放记录；
-- completed 的持久化执行结果与首次完全一致；
-- crashed 为 interrupted，重复提交返回包含“中断”的错误；
-- Session 只比完成快照多一条崩溃前的用户消息，没有重复用户消息；
-- runs 始终只有 complete/crash 两条；
-- 两次恢复及两个 verify 进程的快照一致。
-
-实际结果：**5 次 SIGKILL，5/5 通过**；独立运行该文件约 1.4 秒。
-
-```bash
+```text
 npm test -- test/d023-crash-idempotency.test.ts
+Test Files  1 passed
+Tests       10 passed（第 1–10 次全部通过）
 ```
 
-## 7. 完整验证与真实覆盖率
+该 10 轮文件随后又在全量 `check` 和全量 `coverage` 中各执行一次；本日这三轮自动化共完成 30 次真实 SIGKILL，全部通过。
 
-```bash
-npm run check
-npm run test:coverage
+## 6. 覆盖率逐文件复审
+
+全局阈值保持 **statements 80 / lines 80 / functions 80 / branches 75**，未降低任何阈值。逐文件复审按任务要求使用 statements / functions / lines ≥ 80、branches ≥ 75。
+
+实际全量报告：
+
+| 范围 | Statements | Functions | Lines | Branches | 结论 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| 全部生产文件 | 94.13% | 98.74% | 94.84% | 89.84% | 过全局下限 |
+| `src/memory/run-store.ts`（本日修改） | 91.54%（65/71） | 100%（24/24） | 91.42%（64/70） | 94.38%（84/89） | 过逐文件下限 |
+
+**本日无新增生产文件。** 唯一修改的生产文件是 `src/memory/run-store.ts`，其 statements / functions / lines 均高于 80，branches 高于 75。数据来自 `coverage/memory/run-store.ts.html` 与本次终端覆盖率汇总；未为凑数字修改生产代码。
+
+## 7. 真实全量验证结果
+
+本机环境：Node.js `v24.19.0`，npm `11.17.0`。
+
+| 命令 | 真实结果 |
+| --- | --- |
+| `npm run check` | ESLint、TypeScript、全量测试通过；28 个测试文件、230 项测试 |
+| `npm run test:coverage` | 28 个测试文件、230 项测试通过；全局及上述逐文件指标过线 |
+| 连续 10 轮 `test/run-command.test.ts` | 每轮 22 项，累计 220 项通过 |
+| `npm test -- test/d023-crash-idempotency.test.ts` | 10 次真实 SIGKILL 全部通过 |
+
+### 实际打包安装验证
+
+本日实际执行了 `npm pack --pack-destination <clean-temp-dir>`，随后在另一个干净临时目录执行 `npm install --prefix <clean-install-dir> <tarball>`，安装成功。随后从该安装目录读取包元数据并用 `DatabaseSync(':memory:')` 执行 `SELECT 1`，输出：
+
+```text
+personal-agent tarball install/sqlite smoke: ok
 ```
 
-2026-12-03 本分支实际结果：
+也实际探测了安装后的 TypeScript 运行时导入：Node.js 24 对 `node_modules` 内 `.ts` 文件抛出 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`，即使加 `--experimental-transform-types` 也相同。因此没有声称 tarball 已是可导入的 JavaScript 运行时；这一限制和冒烟的准确边界已写入 [docs/install.md](docs/install.md)。可运行开发方式仍是仓库内 `npm ci` 后 `npm run dev`。
 
-- ESLint：通过；
-- TypeScript `tsc --noEmit`：通过；
-- **28 个测试文件、217 项测试全部通过**；
-- 其中新增 9 项：4 项幂等/迁移测试 + 5 项真实 SIGKILL 测试；
-- 保留的 208 项旧测试全部通过。
+## 8. 本日文件与边界
 
-| 覆盖率 | 实际值 | 项目阈值 |
-| --- | ---: | ---: |
-| Statements | 94.06% | 80% |
-| Branches | 89.29% | 75% |
-| Functions | 98.69% | 80% |
-| Lines | 94.77% | 80% |
+- `src/memory/run-store.ts`：完成结果结构校验。
+- `test/d023-idempotency.test.ts`：损坏 `result_json` RED/GREEN 与回归测试。
+- `test/run-command.test.ts`：ready 后触发 timeout 的确定性测试。
+- `test/d023-crash-idempotency.test.ts`：5 轮扩为 10 轮真实 SIGKILL。
+- `docs/install.md`：陌生开发者安装与本地 tarball 验证。
+- `README.md`：本教学记录。
 
-命令输出中的 npm `home` 配置提示不是测试失败。测试只使用本地临时文件、脚本 Provider 和真实子进程，不读取凭证，也不进行真实外部网络验证。
-
-## 8. 明确边界
-
-- **不承诺外部副作用 exactly-once。** 已完成后的服务层重复请求不会重放工具；但崩溃前工具可能已发邮件、扣款或写外部系统，SQLite 无法撤销这些效果。
-- **不自动重放 interrupted。** 人工审计后用新 runId 重试，才是显式、可审计的边界。
-- **不是跨 Session/Run 的分布式事务。** 最终 Session 与 run 完成之间的崩溃会留下 interrupted，由调用方处理。
-- **不是多进程并发执行协调器。** 没有 leader election、heartbeat 或跨进程请求队列；运行写入按单进程服务边界使用。数据库主键不是授权多个进程同时写同一 Session 的理由。
-- **旧 D022 完成记录不自动获得幂等结果。** 缺少 userMessage/result 的历史记录仍可读取，但不会被猜成可安全返回的 D023 完成结果。
-- 文件、Shell、外部业务 API 仍需要自己的权限、补偿与审计策略。
-
-## 9. 本日复盘
-
-幂等的关键不是给 Loop 加一个内存缓存，而是让请求身份、完成状态和可返回结果一起跨越进程边界持久化。真正安全的顺序也必须改变：**先识别重复，再决定是否写入**。对无法判定的中断状态，拒绝和显式人工重试比“再跑一次试试”更可靠。
+边界：未合并 `main`，未做 D025，未发布 npm 或 GitHub release，未制作视频，未声称任何外部用户反馈。SIGKILL 验证环境为 macOS / Node.js 24；Windows 的 POSIX signal 语义不在本次实测范围内。当前 `private` 源码开发包的公开运行时发布形态仍属后续发布工作。
