@@ -1,242 +1,155 @@
-# Personal Agent · 第 39 天
+# Personal Agent · 第 40 天
 
-> 本文件是 D039 的完整教学文档，不是 `main` 索引。目标是亲手运行一次真实跨进程 MCP 故障演示，看清“传输断开”和“工具业务错误”的边界，以及为什么必须用新 Client 恢复、不能自动重放失败调用。
+> **D040 / D100 · v0.1.0**
+> 今日主题：**MCP 是标准还是过渡方案？**
+> 本文件是 D040 的完整教学入口，不是 `main` 索引。本日只新增课程文档并更新本入口，没有修改运行时代码、测试、依赖或协议能力。
 
-## 1. 今日任务
+## 1. 今日任务与诚实边界
 
-任务卡要求：**Demo：跨进程 MCP 调用完整演示；录屏（含失败重连）**。
+任务卡要求：**公开课：MCP 是标准还是过渡方案；公开课回放**。
 
-本日交付一条离线、确定性、可重复的真实 stdio 调用链：
+本轮交付的是一套可直接讲授的中文 90 分钟课程包，包含讲义、逐段讲师稿、板书/图示、互动、练习与参考答案、FAQ、课后阅读和真实来源核查。
 
-1. Client 启动独立 OS 进程中的 MCP Server。
-2. 完成 `initialize`、能力校验、`notifications/initialized`、`tools/list`。
-3. 通过 D037 的 MCP Tool 适配层和本地 `ToolRegistry` 完成第一次 `tools/call`。
-4. 专用测试 Server 在响应 `disconnect` 前以退出码 `42` 终止，制造真实传输断开。
-5. 旧 Client 的 pending Promise 以 `McpClientError(code="TRANSPORT_ERROR")` 拒绝；旧 Client 被显式关闭。
-6. Client factory 创建**另一个** `StdioMcpClient`，启动新 Server 进程并重新完成握手与工具发现。
-7. 用不同 call id、不同参数发起独立的新调用并成功。
-8. 关闭全部子进程后才输出 `D039 PASS`，入口退出码为 `0`。
+**课程材料已准备，但未实际授课、无真实回放、无学员反馈。**
 
-当前仓库没有录屏交付链，因此本日不伪造视频、外部反馈或公开课，保留本轮真实终端记录：[`evidence/d039-transcript.txt`](evidence/d039-transcript.txt)。
+因此：
 
-## 2. 先运行，再看原理
+- 不提供虚构的视频链接、直播地址、授课照片或观看人数；
+- 不编造现场提问、投票结果、学员评价或反馈归档；
+- 讲师稿中的引号是备课文本，不是已发生发言的转录；
+- [`evidence/d039-transcript.txt`](evidence/d039-transcript.txt) 只属于 D039 跨进程故障演示，**不是 D040 公开课回放**；
+- 本日没有新增 `demo:d040`，也没有借旧 Demo 假装举办了课程。
 
-### 2.1 环境
+## 2. 从这里开始学习
 
-- macOS 26.5（本轮实测环境）
-- Node.js `v24.19.0`
-- npm `13.8.0`
-- TypeScript、Vitest 均使用仓库既有开发依赖
-- 不需要 API Key，不访问外部服务，不新增运行时依赖
+| 学习顺序 | 材料 | 内容 | 用法 |
+| --- | --- | --- | --- |
+| 1 | [完整公开课讲义](docs/d040-public-course.md) | 90 分钟课程、核心争论、协议与传输、安全、治理、仓库证据、决策与迁移 | 学员主读物，讲师投影 |
+| 2 | [逐段讲师稿](docs/d040-instructor-script.md) | 每段可直接讲授的中文话术、板书动作、互动与无回应兜底 | 讲师备课或复讲 |
+| 3 | [互动、练习、答案与 FAQ](docs/d040-exercises.md) | 8 组练习、退出题、100 分量规、15 个 FAQ | 先遮住答案独立完成 |
+| 4 | [来源与核查记录](docs/d040-sources.md) | 28 个真实 HTTPS 来源、准确标题、事实映射、访问日期、HTTP 结果和失败项 | 核对行业事实与版本时效 |
 
-### 2.2 运行 Demo
+建议先读讲义第 1、2、8、9 节建立争论地图，再按 90 分钟顺序学习。若准备授课，直接使用讲师稿的时间段和互动指令；若自学，完成 E1–E8 后用评价量规检查。
 
-在 `personal-agent` 根目录执行：
+## 3. 核心争论地图
 
-```bash
-npm run demo:d039
-```
-
-也可以直接执行入口：
-
-```bash
-node scripts/d039-reconnect.ts
-```
-
-本轮 transcript 中的真实进程关系是：
-
-| 角色 | PID | 结果 |
-| --- | ---: | --- |
-| Demo Client / 父进程 | 21992 | 编排两次连接并清理资源 |
-| 第一次 Server | 21993 | 首次 echo 成功，随后按测试设计以 42 退出 |
-| 第二次 Server | 21994 | 重新握手并完成恢复后的独立 echo |
-
-PID 每次运行都会变化；应检查两个 `serverPid` 不同，而不是期待固定数字。关键输出如下，完整原文以 transcript 为准：
+本课不回答一个脱离场景的“是/否”，而把命题拆成五层证据：
 
 ```text
-connection=1 initialize=ok protocol=2025-11-25
-connection=1 notifications/initialized=sent
-connection=1 tools/list=ok names=echo,disconnect
-tools/call id=d039-first-echo result=ok serverPid=21993
-failureCode=TRANSPORT_ERROR message="MCP Server 提前退出（code=42, signal=null）"
-connection=1 oldClientClosed=true failedCallReplayed=false
-connection=2 initialize=ok protocol=2025-11-25
-connection=2 notifications/initialized=sent
-connection=2 tools/list=ok names=echo,disconnect
-tools/call id=d039-recovered-echo result=ok serverPid=21994
-cleanup clients=2 closed=true
-D039 PASS ... failedCallReplayed=false
-exitCode=0
+① 协议规范：共同语言是否公开、明确版本、可审阅？
+② SDK / 实现：实现是否完整、维护一致、通过一致性测试？
+③ Server 生态：可发现之外，质量、维护与供应链怎样？
+④ 企业采用：是否进入真实权限、审计、采购和运维流程？
+⑤ 实际互操作：哪个 Client×Server×版本×传输×能力组合通过了什么测试？
 ```
 
-若握手、失败类型、恢复调用或清理不符合要求，脚本会输出 `D039 FAIL` 并非零退出，不会输出 `D039 PASS`。
+### 支持“正在形成持久开放标准”的依据
 
-## 3. 架构：复用 D035～D037，不重写 MCP
+- 公开、版本化的协议规范，以及明确的生命周期、传输和 Tools 等能力定义；
+- 公开治理、SEP、Feature Lifecycle、SDK tiers 与一致性意识；
+- Linux Foundation 于 2025-12-09 宣布 AAIF，MCP 是创始贡献项目之一；
+- Agent 发现和调用外部能力是需要长期解决的集成问题。
 
-### 3.1 文件职责
+### 支持“可能成为过渡方案”的条件
 
-| 文件 | 职责 |
-| --- | --- |
-| `src/adapters/mcp-stdio-client.ts` | D035 既有 Client：进程、ndjson 帧、请求配对、握手、取消、超时、关闭；本日未修改 |
-| `src/adapters/mcp-stdio-server.ts` | D036 既有 Server：initialize 闸门、tools/list、tools/call；本日未修改 |
-| `src/adapters/mcp-tool.ts` | D037 既有适配层：远端 Tool 投影为本地 Tool；本日未修改 |
-| `src/tools/registry.ts` | 复用本地工具注册、参数校验与执行入口 |
-| `src/demo/d039-mcp-server.ts` | 本日新增的仓库内确定性测试 Server，提供 `echo` 与 `disconnect` |
-| `src/demo/d039.ts` | 演示编排、精确错误分类、新 Client 恢复和最终清理 |
-| `scripts/d039-reconnect.ts` | 可运行入口；成功输出 PASS，失败设置非零退出码 |
-| `test/d039-reconnect-demo.test.ts` | 真实跨进程集成测试及不可重连错误边界测试 |
-| `evidence/d039-transcript.txt` | 本轮实际终端输出与真实退出码 |
+- 2025-11-25 到 2026-07-28 的状态模型和协商机制演进带来迁移成本；
+- 模型私有工具 Schema、结果信封、缓存、过滤和审批仍需转换；
+- stdio 进程或 Streamable HTTP 会话都有实际安全和运维成本；
+- SDK/Server 质量不均，Registry 可发现不等于代码安全；
+- 少量稳定内部 API 使用直连 OpenAPI/REST 可能更简单。
 
-`d039-deterministic-test-server` 只是明确命名的仓库内测试 Server，**不是官方或外部 MCP Server**。它没有网络依赖，也不冒充第三方实现。
+### 本课结论
 
-### 3.2 进程与模块关系
+**MCP 可以既是开放标准进程中的通用协议候选，又是某些团队当前架构中的过渡层。** 选择应固定到版本、工作负载、目标组合证据、安全门槛和退出成本。课程不提供绝对技术预测或投资建议。
 
-```text
-scripts/d039-reconnect.ts
-  └─ runD039Demo                         [父进程]
-      ├─ Client factory #1
-      │   └─ StdioMcpClient #1 ── stdio ndjson ── Server 进程 #1
-      │       ├─ McpStdioServer
-      │       ├─ echo
-      │       └─ disconnect → exit(42)
-      ├─ close(Client #1)
-      ├─ Client factory #2
-      │   └─ StdioMcpClient #2 ── stdio ndjson ── Server 进程 #2
-      │       └─ echo（新的独立调用）
-      └─ finally close(所有 Client)
-```
+### 三个“不等于”
 
-Client 与 Server 不是同一进程内直接调用函数。`echo` 返回值中的 `serverPid` 来自 Server 进程的 `process.pid`，测试还断言它既不同于父进程 PID，也不同于恢复后的 Server PID。
+1. **标准化不等于零适配**：真实 SDK 仍需 MCP Tool→模型工具、Schema 和结果映射。
+2. **标准化不等于安全边界**：认证不等于授权，OAuth token 不等于业务权限，Registry 不等于代码审计。
+3. **标准化不等于模型能力**：协议互通不保证模型会选对工具、填对参数或完成业务任务。
 
-### 3.3 完整时序
+## 4. 90 分钟课程结构
 
-```text
-父进程                  Client #1              Server #1
-  │ initialize            │                       │
-  │──────────────────────>│──────────────────────>│
-  │                       │<────── result ────────│
-  │                       │── initialized ───────>│
-  │ tools/list            │──────────────────────>│
-  │<──── echo tools ──────│<────── result ────────│
-  │ tools/call echo       │──────────────────────>│
-  │<──── success/PID ─────│<────── result ────────│
-  │ tools/call disconnect │──────────────────────>│
-  │                       │        进程退出 42 <──│
-  │<── TRANSPORT_ERROR ───│                       │
-  │ close(Client #1)      │                       │
-  │                       │                       │
-  │                  Client #2              Server #2
-  │ initialize            │                       │
-  │──────────────────────>│──────────────────────>│
-  │                       │── initialized ───────>│
-  │ tools/list            │──────────────────────>│
-  │ tools/call echo       │──────────────────────>│
-  │<──── success/PID ─────│<────── result ────────│
-  │ finally close         │                       │
-```
-
-两次 `openSession` 都执行完整握手和工具发现，不存在“沿用第一次 initialized 状态”的捷径。
-
-## 4. 失败与重连语义
-
-### 4.1 只有一种情况进入本 Demo 的恢复路径
-
-```ts
-try {
-  await first.client.callTool("disconnect", {});
-} catch (error) {
-  if (!(error instanceof McpClientError) || error.code !== "TRANSPORT_ERROR") {
-    throw error;
-  }
-  // 关闭旧 Client，再由 factory 创建新 Client。
-}
-```
-
-| 结果或错误 | 是否进入演示性重连 | 原因 |
+| 时间 | 主题 | 关键问题 |
 | --- | --- | --- |
-| `McpClientError(code="TRANSPORT_ERROR")` | 是，仅本 Demo 的一次 | 已明确观察到 stdio 子进程退出等传输故障 |
-| MCP `CallToolResult.isError=true` | 否 | 这是已完成响应中的业务工具失败，不是断线 |
-| `McpRpcError` / `RPC_ERROR` | 否 | Server 已返回 JSON-RPC error，传输仍可能正常 |
-| `TIMEOUT` | 否 | 无法据此断定调用未执行，不能擅自重放 |
-| `ABORTED` | 否 | 调用方主动取消，不是重连信号 |
-| `PROTOCOL_ERROR` / `VERSION_UNSUPPORTED` | 否 | 应修复协议或版本，而不是重连碰运气 |
+| 0–6 分钟 | 诚实边界与开场投票 | 什么证据会让我改判？ |
+| 6–16 分钟 | 标准定义与五层证据 | 公告、SDK 和互操作为何不能混用？ |
+| 16–28 分钟 | 架构、生命周期、版本与能力 | 版本协商、能力协商和业务授权有何不同？ |
+| 28–40 分钟 | stdio、Streamable HTTP、会话与关闭 | 本地进程和远程服务各增加什么成本？ |
+| 40–50 分钟 | function calling、REST/OpenAPI、A2A、Schema | 为什么同名 JSON Schema 仍会不适配？ |
+| 50–56 分钟 | 休息 | 留下一个最质疑的问题 |
+| 56–66 分钟 | 认证、权限、注入与供应链 | 协议之外还缺哪些安全控制？ |
+| 66–76 分钟 | 治理、生态与正反方辩论 | 双方的适用条件和反证是什么？ |
+| 76–84 分钟 | D034–D039 仓库证据研讨 | 一个子集能证明什么、不能证明什么？ |
+| 84–90 分钟 | 决策、迁移与退出题 | 换掉 MCP 后哪些资产仍能保留？ |
 
-正常 echo 通过 `createMcpTool + ToolRegistry` 调用；故障探测直接使用原始 Client，是为了保留 `McpClientError.code` 与 `McpRpcError` 的精确区别，避免只看适配后的 `ToolResult.isError` 而扩大重连范围。
+完整图示和逐段内容见[讲义](docs/d040-public-course.md)；不需要把本入口当作讲师稿逐字朗读。
 
-本日没有给 D035 Client 添加隐式重连，也没有做通用 retry/backoff 框架。单次 Client 仍不可复用重连；恢复动作只属于 Demo 编排层。
+## 5. D034–D039：课程中的代码对应
 
-### 4.2 为什么不重放失败的 `tools/call`
+**精确边界：D035–D039 只实现并验证 `2025-11-25 + stdio + tools` 子集，不宣称完整 MCP。**
 
-传输断开只说明响应没有正常回来，**不证明 Server 没有收到或执行请求**。本日的 `disconnect` 甚至已经产生了“终止进程”这一副作用。若自动重放一个有写文件、扣款或创建订单副作用的工具，可能执行两次。
+| 课程日 | 代码或文档 | 在 D040 中说明什么 |
+| --- | --- | --- |
+| D034 | [协议设计](docs/d034-mcp-protocol.md)、[时序](docs/d034-mcp-sequence.md) | 明确版本、stdio、Tools 子集和初始化时序；历史“当前”表述须按访问日重查 |
+| D035 | `src/adapters/mcp-stdio-client.ts`、`test/d035-mcp-client.test.ts` | 子进程、ndjson、请求关联、初始化、能力检查、ping、tools/list/call、超时与关闭 |
+| D036 | `src/adapters/mcp-stdio-server.ts`、`src/demo/d036-mcp-server.ts` | 仓库内 stdio Server 子集，不是全功能生产 Server |
+| D037 | `src/adapters/mcp-tool.ts`、`scripts/d037-compare.ts` | MCP Tool 与本地 Tool 的适配；统一协议仍需要转换层 |
+| D038 | [MCP 使用文档](docs/mcp.md)、[周复盘](docs/weekly/2026-w51.md) | 使用方式、企业边界和已知限制，不把文档当外部生态证明 |
+| D039 | `src/demo/d039.ts`、`scripts/d039-reconnect.ts`、`test/d039-reconnect-demo.test.ts` | 真实跨进程断开后创建新 Client 做独立调用；不自动重放失败请求 |
 
-因此恢复后的调用是：
+课程明确未实现：Streamable HTTP、Resources、Prompts、2026-07-28 的 `_meta` 每请求能力协商与 `server/discover`、Modern/Legacy/Dual-era 兼容逻辑、完整 structured content/outputSchema 生态，以及通用自动重连等。规范中存在某项能力，不等于本仓库已经实现。
 
-- 新 call id：`d039-recovered-echo`；
-- 新参数：`after-reconnect-independent-call`；
-- 新 Client、新 Server 进程、新初始化会话；
-- 不是 `d039-disconnect` 的再次发送。
+## 6. 练习与自测入口
 
-集成测试记录真实 Client 调用顺序，并断言只有：
+- **E1 证据归层**：分清规范、SDK、Server 生态、企业采用与实际互操作。
+- **E2 版本与能力**：判断版本相同、能力协商、`isError`、超时和后续版本能力。
+- **E3 传输选择**：为本地搜索和共享订单选择 stdio/HTTP，并设计关闭与恢复测试。
+- **E4 Schema 适配**：分析 strict 转换、业务校验、结果信封和三类错误。
+- **E5 安全建模**：处理 token passthrough、confused deputy、注入、跨租户与供应链。
+- **E6 条件化决策**：在两个内部 API、跨团队工具平台和高风险财务写之间做不同选择。
+- **E7 迁移盘点**：区分可保留业务资产和需替换的协议适配。
+- **E8 综合评审**：完成一页架构评审，按 100 分量规自评。
 
-```text
-Client #1 echo → Client #1 disconnect（一次）→ Client #2 echo
-```
+全部题目、参考答案、退出题和 FAQ 位于[`docs/d040-exercises.md`](docs/d040-exercises.md)。答案是备课参考，不是真实学员回答。
 
-### 4.3 清理和证据边界
+## 7. 来源与外部 URL 核查
 
-- 旧 Client 在第二次 factory 调用之前关闭。
-- 外层 `finally` 对创建过的 Client 再执行幂等清理，覆盖中途失败路径。
-- `close()` 复用 D035 的 stdin EOF、SIGTERM、SIGKILL 升级机制。
-- 子进程环境只有 `NO_COLOR=1`，使用绝对 `process.execPath`，不继承父进程凭证。
-- 只有全部步骤和清理成功才输出 PASS；transcript 末尾记录实际 `exitCode=0`。
+固定访问日期：**2026-11-12**。课程优先使用明确版本的 MCP 官方规范、治理公告和真实厂商公开文档；没有引用市占率、采用率或虚构行业数字。
 
-## 5. TDD：先看 RED，再写实现
+实际对 28 个最终引用逐一执行 `curl -L --max-time 35 --connect-timeout 12 ...`，记录 HTTP 状态、最终 URL 与内容类型：
 
-### 5.1 RED
+- **27/28 返回 HTTP 200**；
+- **1/28 返回 HTTP 403**：OpenAI Function calling 页面。其正文在资料阅读阶段可通过页面读取工具取得，但统一 curl 检查没有通过，来源表明确保留该失败；
+- `/specification/latest` 在访问日实际跳转到 `2026-07-28`；旧 `security_best_practices`、新版生命周期和 SDK 等 URL 的真实跳转均已记录；
+- 官方版本页的 current 标记与 `latest` 解析在访问时存在不完全一致，因此课程只使用带版本和日期的有限断言，不声称无日期的“当前规范”。
 
-先新增 `test/d039-reconnect-demo.test.ts`，在实现文件不存在时执行：
+完整命令、28 项标题、URL、事实映射和最终状态见[来源与核查记录](docs/d040-sources.md)。HTTP 200 只说明本轮页面可访问，不等于内容中的每个主张都经过独立行业审计。
 
-```bash
-npm test -- test/d039-reconnect-demo.test.ts
-```
+## 8. 文档与全量回归验证
 
-最终 RED 观察为 **4 项失败、0 项通过**：
+### 8.1 本日验证策略
 
-- 入口测试：`scripts/d039-reconnect.ts` 不存在，`MODULE_NOT_FOUND`；
-- 跨进程恢复测试：`src/demo/d039.ts` 不存在，`ERR_MODULE_NOT_FOUND`；
-- `isError` 边界测试：同样因 Demo 模块不存在而失败；
-- JSON-RPC 错误边界测试：同样因 Demo 模块不存在而失败。
+开工前已加载 TDD 流程。本日没有运行时代码或新行为，因此没有制造无意义 RED，也没有新增测试来假装覆盖文档。验证由四部分组成：
 
-这证明测试覆盖了尚未交付的新行为，而不是在实现后补一条天然通过的断言。
+1. D034–D039 代码、测试和文档事实核查；
+2. Markdown 相对链接检查；
+3. 外部来源的实际 HTTP 检查与失败保留；
+4. 既有 lint、TypeScript、全量测试和 coverage 回归。
 
-### 5.2 GREEN
+### 8.2 文档检查
 
-随后只新增 Demo、专用 Server、入口和 `demo:d039` 脚本，复跑同一命令：
-
-```text
-Test Files  1 passed (1)
-Tests       4 passed (4)
-Duration    476ms
-```
-
-真实 Demo 观察到第一次 Server `19448`、第二次 Server `19449`；随后录制 transcript 时又独立复现为 `21993 → 21994`，说明结果不依赖固定 PID 或预先写好的输出。
-
-## 6. 测试与全量验证
-
-### 6.1 本日聚焦测试
+在仓库根目录执行：
 
 ```bash
-npm test -- test/d039-reconnect-demo.test.ts
+git diff --check
 ```
 
-4 项测试分别验证：
+结果：**通过，退出码 0，无 whitespace 错误**。
 
-1. 真实可运行入口使用默认 Client factory，清理后输出 PASS。
-2. 两个真实 Server 进程完成成功、断开、新 Client 恢复；disconnect 只调用一次，且旧 Client 先关闭。
-3. MCP `isError` 不创建第二个 Client、不重放，并清理已有 Client。
-4. JSON-RPC error 不创建第二个 Client、不重放，并保留 `RPC_ERROR` 与 `rpcCode`。
+相对链接检查覆盖 `README.md` 和四个 D040 文档，跳过 HTTPS 外部链接，逐一解析本地路径和可选锚点。结果：**5 个文件、32 条相对链接、0 个错误**。
 
-### 6.2 全项目检查
+### 8.3 全量检查
 
 实际执行：
 
@@ -244,44 +157,33 @@ npm test -- test/d039-reconnect-demo.test.ts
 npm run check
 ```
 
-结果：**45 个测试文件、397 项测试全部通过**，lint 与 TypeScript 类型检查通过。
+结果：**ESLint 与 TypeScript 类型检查通过；45/45 个测试文件、397/397 项测试通过，退出码 0**。该命令依次运行 ESLint、TypeScript `tsc --noEmit` 和 Vitest 全量测试。
 
-### 6.3 覆盖率与实测数据
+### 8.4 覆盖率
 
-完整覆盖率命令：
+实际执行：
 
 ```bash
 npm run test:coverage
 ```
 
-排查期间，既有 D035 用例“请求超时会清理 pending”曾在并行执行全量任务及默认高并发下，两次于 `initialize` 的既有 100ms 限时处失败；单独运行该文件在覆盖率下 20/20 通过，限 4 个 worker 的全量复跑也通过。最终按要求串行执行 `npm run check && npm run test:coverage`，**不带额外参数的原始覆盖率命令退出 0**。
+结果：**45/45 个测试文件、397/397 项测试通过，退出码 0**。
 
-最终结果为 **45/45 文件、397/397 测试通过**，没有修改旧测试、放宽请求超时或降低覆盖率门槛。真实汇总：
-
-| 指标 | 覆盖率 | 配置门槛 |
+| 指标 | 本轮实测 | 配置门槛 |
 | --- | ---: | ---: |
 | Statements | 91.66% | 80% |
 | Branches | 87.45% | 75% |
 | Functions | 97.95% | 80% |
 | Lines | 93.29% | 80% |
 
-D039 编排文件 `src/demo/d039.ts` 的实测覆盖率为 Statements 92.15%、Branches 73.33%、Functions 85.71%、Lines 93.61%。独立 Server 文件在子进程中运行，其父进程 V8 coverage 不聚合该子进程计数，所以报告显示 0%，但它确实被入口测试和跨进程集成测试执行；0% 不代表本次 Demo 使用了模拟 Server。
+本日没有修改运行时代码，因此覆盖率变化只应视为本轮真实回归结果，不宣称为课程文档带来的代码质量提升。
 
-## 7. 如何审查证据
+## 9. 已知限制
 
-1. 打开 [`evidence/d039-transcript.txt`](evidence/d039-transcript.txt)，先确认 Node 版本与命令。
-2. 找两段 `initialize=ok` 和两段 `notifications/initialized=sent`，确认不是复用旧会话。
-3. 找第一次 echo 的 PID、`code=42` 和 `TRANSPORT_ERROR`，确认是真实进程退出。
-4. 找 `oldClientClosed=true`，确认它出现在第二次 factory 之前。
-5. 比较恢复后的 call id、参数和 PID，确认不是失败调用重放。
-6. 确认 `cleanup clients=2 closed=true`、`D039 PASS` 和 `exitCode=0`。
-7. 如需重新生成，可在 zsh 中使用 `setopt pipefail` 后将真实命令输出通过 `tee` 写入该文件；失败时必须保留非零退出，不能把旧 PASS 当作新证据。
-
-## 8. 已知限制
-
-- 这是 D039 的定点故障演示，不是生产级通用重连器，没有指数退避、多次重试或自动请求重放。
-- 故障由仓库内测试 Server 确定性产生，尚未证明任意第三方 Server 的恢复行为；外部 SDK 能力仍以 D035 文档边界为准。
-- stdio Client 与 Server 子进程一一对应；旧 Client 永远不在原进程上“复活”。
-- 只有明确 `TRANSPORT_ERROR` 才进入本演示恢复路径；超时是否安全重试必须由具体工具的幂等性另行决定。
-- 本轮只在 macOS + Node 24 实测，没有声明 Windows 或其他 Node 版本兼容结果。
-- 本日交付真实终端 transcript，不声称已生成视频、公开课程或获得外部反馈。
+- 本课程材料完整可讲授，但本轮没有实际授课、真实回放或学员反馈；教学效果尚未经过现场验证。
+- 所有行业资料核查固定在 2026-11-12；后续版本、治理和厂商文档可能变化，复讲前必须重查。
+- 一个 OpenAI 文档页面对本轮 curl 返回 403，已在来源表标记；没有把它写成全部 URL 均成功。
+- 课程只做 A2A 边界比较，不提供 A2A 实现教程或完整协议评测。
+- 本仓库证据只覆盖 macOS + Node 24 环境下的既有测试及 `2025-11-25 + stdio + tools` 子集，不证明所有第三方实现或所有平台互通。
+- 课程中的安全清单是威胁建模起点，不能替代具体系统的身份、租户、合规、供应链和业务风险评审。
+- 决策清单用于工程架构评估，不是市场预测、采购承诺或绝对投资建议。
