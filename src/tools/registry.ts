@@ -1,6 +1,7 @@
 import type { ToolCall } from '../core/message.ts';
 import type { Tool, ToolContext, ToolResult, ToolSchema } from '../core/tool.ts';
 import { errorResult, normalizeError, toolError } from './errors.ts';
+import { ResilientToolExecutor, type ToolResilienceOptions } from './resilience.ts';
 import { validateArguments, validateToolSchema } from './schema.ts';
 
 export type ToolMetadata = Readonly<Record<string, unknown>>;
@@ -12,6 +13,8 @@ export interface ToolRegistrationOptions {
   readonly tenantId?: string;
   /** 敏感工具每次执行前都必须通过本次调用的确认回调 */
   readonly sensitive?: boolean;
+  /** 可选的执行韧性策略；省略时完整保留旧执行路径 */
+  readonly resilience?: ToolResilienceOptions;
 }
 
 export interface ToolConfirmationRequest {
@@ -44,6 +47,7 @@ interface RegistryEntry {
   readonly metadata: ToolMetadata;
   readonly tenantId?: string;
   readonly sensitive: boolean;
+  readonly resilience?: ResilientToolExecutor;
 }
 
 function createEntry(tool: Tool, options: ToolRegistrationOptions): RegistryEntry {
@@ -82,6 +86,9 @@ function createEntry(tool: Tool, options: ToolRegistrationOptions): RegistryEntr
     metadata,
     ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
     sensitive: options.sensitive === true,
+    ...(options.resilience === undefined
+      ? {}
+      : { resilience: new ResilientToolExecutor(options.resilience) }),
   };
 }
 
@@ -242,7 +249,9 @@ export class ToolRegistry {
       ...(this.policy.tenantId === undefined ? {} : { tenantId: this.policy.tenantId }),
     };
     try {
-      return await tool.execute(args, executionContext);
+      return entry.resilience === undefined
+        ? await tool.execute(args, executionContext)
+        : await entry.resilience.execute(tool, args, executionContext);
     } catch (error) {
       return errorResult(normalizeError(error));
     }

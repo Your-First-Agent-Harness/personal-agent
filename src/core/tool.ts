@@ -39,6 +39,10 @@ export type ToolErrorCode =
   | 'COMMAND_FAILED'
   | 'COMMAND_TIMEOUT'
   | 'COMMAND_CANCELLED'
+  | 'TOOL_TIMEOUT'
+  | 'TOOL_CANCELLED'
+  | 'TOOL_RATE_LIMITED'
+  | 'TOOL_CIRCUIT_OPEN'
   | 'INTERNAL_ERROR';
 
 export interface ToolErrorDetail {
