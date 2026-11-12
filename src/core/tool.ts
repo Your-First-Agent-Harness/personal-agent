@@ -43,6 +43,9 @@ export type ToolErrorCode =
   | 'TOOL_CANCELLED'
   | 'TOOL_RATE_LIMITED'
   | 'TOOL_CIRCUIT_OPEN'
+  | 'MCP_TOOL_ERROR'
+  | 'MCP_RPC_ERROR'
+  | 'MCP_TRANSPORT_ERROR'
   | 'INTERNAL_ERROR';
 
 export interface ToolErrorDetail {

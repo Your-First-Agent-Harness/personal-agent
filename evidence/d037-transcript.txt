@@ -1,0 +1,23 @@
+$ npm run demo:d037
+node=v24.19.0
+
+> personal-agent@0.1.0 demo:d037
+> node scripts/d037-compare.ts
+
+D037 package=@modelcontextprotocol/server-filesystem@2025.11.25
+workspace=/private/var/folders/0w/wvq76g_x4y9fx240ktqjbgzr0000gn/T/personal-agent-d037-demo-XlYYiZ allowedDirectory=/private/var/folders/0w/wvq76g_x4y9fx240ktqjbgzr0000gn/T/personal-agent-d037-demo-XlYYiZ
+backend=local tools=read_file,list_dir
+backend=local exposed=list_dir args={} remote=list_dir remoteArgs={} summary="nested/ note.txt" isError=false
+backend=local exposed=read_file args={"path":"note.txt"} remote=read_file remoteArgs={"path":"note.txt"} summary="D037 shared workspace" isError=false
+backend=local closed=true
+backend=mcp tools=read_file,list_dir
+backend=mcp negotiated=2025-11-25 server=secure-filesystem-server@0.2.0
+backend=mcp exposed=list_dir args={} remote=list_directory remoteArgs={"path":"/private/var/folders/0w/wvq76g_x4y9fx240ktqjbgzr0000gn/T/personal-agent-d037-demo-XlYYiZ"} summary="[DIR] nested [FILE] note.txt" isError=false
+backend=mcp exposed=read_file args={"path":"note.txt"} remote=read_file remoteArgs={"path":"/private/var/folders/0w/wvq76g_x4y9fx240ktqjbgzr0000gn/T/personal-agent-d037-demo-XlYYiZ/note.txt"} summary="D037 shared workspace" isError=false
+backend=mcp closed=true
+workspaceRemoved=true
+result backend=local turns=3 stopReason=completed final="同一任务完成：已列目录并读取 note.txt。"
+result backend=mcp turns=3 stopReason=completed final="同一任务完成：已列目录并读取 note.txt。"
+D037 comparison passed; workspaceRemoved=true
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+exitCode=0

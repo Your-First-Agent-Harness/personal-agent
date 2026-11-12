@@ -1,225 +1,208 @@
-# Personal Agent · 第 36 天
+# Personal Agent Harness
 
-> 进度：D036 / D100 · v0.1.0
->
-> 主题：MCP Server 实现「把自有工具暴露出去」——自己的 Server 可被别的客户端调用
->
-> 今日交付：Node 24 原生 TypeScript ESM、零新增运行时依赖的手写 JSON-RPC 2.0 ndjson stdio Server；复用真实 ToolRegistry；安全临时工作区示例；单元/跨进程测试；官方 Inspector 独立客户端 transcript。
+> **进度：D037 / D100 · v0.1.0** · Node.js 24 原生 TypeScript ESM
 
-## 先跑起来
+D037 把官方 filesystem MCP Server 接入现有 `Tool` / `ToolRegistry`，同时保留本地自研 `read_file`、`list_dir`。调用方通过工厂选择 `local` 或 `mcp`；`AgentLoop`、模型请求格式和 Registry 调度逻辑不变。外部官方 Server 只由独立 `npx` 子进程启动，**没有新增项目运行时依赖**。
 
-环境：Node 24、npm。项目运行时依赖仍为零。
+## 快速验证
 
 ```bash
 npm install
 npm run check
 npm run test:coverage
+
+# 启动真实官方 Server，比较 local / MCP；首次运行需要网络下载 npx 包
+npm run demo:d037
 ```
 
-启动安全示例 Server（stdout 只用于 MCP 消息，日志只写 stderr）：
+真实官方验证 transcript：[`evidence/d037-transcript.txt`](./evidence/d037-transcript.txt)。本次实际使用：
 
-```bash
-npm run mcp:server
-```
+- npm 包：`@modelcontextprotocol/server-filesystem@2025.11.25`（精确版本，不使用 `latest`）。
+- Server 自报：`secure-filesystem-server@0.2.0`。
+- Client 请求并协商：MCP `2025-11-25`，stdio + NDJSON。
+- 两种后端均完成真实 `AgentLoop` 三轮：列目录、读文件、最终回答；Server 关闭、临时目录删除，进程退出码 `0`。
 
-该命令等待 stdio 客户端，不是一个会自行打印 Demo 结果然后退出的命令。用下面的官方 CLI 连接它，即可完成可复现演示。
+## 为什么做适配，而不是重写 AgentLoop
 
-## 独立官方客户端验收
-
-实际使用：**`@modelcontextprotocol/inspector@2.15.0`**，通过 `npx` 临时执行，没有加入 `dependencies`、`devDependencies` 或 lockfile。原始输出、包版本、Node/npm 版本和退出码见：
-
-- `docs/d036-inspector-transcript.txt`
-
-在仓库根目录逐条复现：
-
-```bash
-# initialize：确认协议版本、serverInfo、capabilities
-npx --yes @modelcontextprotocol/inspector@2.15.0 \
-  --cli --transport stdio --format json --method initialize \
-  -- node src/demo/d036-mcp-server.ts
-
-# tools/list：官方 Client 发现两个自有工具
-npx --yes @modelcontextprotocol/inspector@2.15.0 \
-  --cli --transport stdio --format json --method tools/list \
-  -- node src/demo/d036-mcp-server.ts
-
-# tools/call：通过真实 Registry/read_file 读取临时工作区文件
-npx --yes @modelcontextprotocol/inspector@2.15.0 \
-  --cli --transport stdio --format json --method tools/call \
-  --tool-name read_file --tool-args-json '{"path":"README.txt"}' \
-  -- node src/demo/d036-mcp-server.ts
-```
-
-真实结果摘要：
-
-- `initialize` 返回 `protocolVersion: "2025-11-25"`、`serverInfo.name: "personal-agent-safe-demo"` 与 `capabilities.tools`。
-- `tools/list` 返回 `read_file`、`list_dir`，保留 Registry 中的描述和 JSON Schema。
-- `tools/call read_file {"path":"README.txt"}` 返回临时工作区的真实文本，`isError: false`。
-- 三次 CLI 退出码均为 0；每次 CLI 都启动一个全新的 Server 子进程并自行完成握手，所以 transcript 中临时目录随机后缀不同。
-
-`test/d036-stdio-integration.test.ts` 还用 D035 的 `StdioMcpClient` 做互通回归，但**自有 Client 不被当作独立客户端证据**；独立证据只认上面的官方 Inspector 实际执行。
-
-## 代码入口
-
-- `src/adapters/mcp-stdio-server.ts`：stdio Server、生命周期、JSON-RPC、Registry 适配、并发/取消/关闭。
-- `src/demo/d036-mcp-server.ts`：临时工作区和明确双工具白名单示例。
-- `test/d036-mcp-server.test.ts`：协议、错误、真实 Registry、并发、取消和关闭测试。
-- `test/d036-stdio-integration.test.ts`：真实子进程互通，读取文件并验证文件错误和路径边界。
-- `docs/d036-inspector-transcript.txt`：官方独立客户端真实证据。
-
-## Server 生命周期
+`AgentLoop` 的依赖应当只是稳定的 Tool 契约，而不是某个进程通信协议：
 
 ```text
-Client                         Server
-  | initialize(request)          |
-  |----------------------------->| 校验 params，协商版本
-  | initialize(result)           |
-  |<-----------------------------| 只声明本日支持的 2025-11-25
-  | notifications/initialized    |
-  |----------------------------->| 进入 ready；通知不回复
-  | ping / tools/list/call       |
-  |<============================>| 业务请求可并发完成
-  | notifications/cancelled      |
-  |----------------------------->| 真实 AbortSignal；通知不回复
-  | 关闭 stdin                   |
-  |----------------------------->| abort 在途调用、清理、停止写响应
+模型/脚本
+   │  始终调用 read_file / list_dir
+   ▼
+AgentLoop → ToolRegistry → Tool.execute(args, context)
+                              │
+                ┌─────────────┴──────────────┐
+                ▼                            ▼
+          本地 fs Tool                 MCP Tool 适配层
+                                          │  StdioMcpClient
+                                          ▼
+                         npx @modelcontextprotocol/server-filesystem
 ```
 
-规则：
+适配层负责协议差异，Loop 不需要判断后端：
 
-1. `initialize` 要求字符串 `protocolVersion`、对象 `capabilities`，以及含字符串 `name/version` 的 `clientInfo`。
-2. 客户端版本正好是 `2025-11-25` 时回显该版本；其他字符串版本仍返回 Server 支持的 `2025-11-25`，由 Client 决定是否继续。本日不实现 `2026-07-28`。
-3. `ping` 在初始化前也可用；`tools/*` 必须等 `notifications/initialized`，否则返回 `-32000 Server not initialized`。
-4. 重复 `initialize` 返回 `-32600`。未知方法返回 `-32601`。
-5. MCP stdio 没有另造 `shutdown/exit` RPC；本实现按 D034 的真实边界以 stdio 关闭作为关闭信号。
-6. 所有通知都不回复，包括未知通知、未知取消 id、初始化完成通知。收到没有对应 Server 请求的 JSON-RPC response（未知 id）也只忽略，不再生成第二个响应。
+1. 把 MCP `tools/list` 的 `inputSchema` 投影为 Tool `parameters`。
+2. 把 Registry 已解析的对象参数交给 `tools/call`，继续传递 `AbortSignal`。
+3. 把 MCP `content`、`isError`、`structuredContent.error` 和 JSON-RPC/传输异常转换成 `ToolResult`。
+4. 在工厂中完成连接、能力发现、必要工具校验与关闭，失败不会留下无人管理的子进程。
 
-### ndjson 与日志
+核心入口：
 
-- 每条消息恰好一行；使用 `JSON.stringify(message) + "\n"` 写出，不使用 Content-Length 或字符串拼接构造 JSON。
-- 使用 readline 分帧，支持 CRLF、跨 chunk 消息和多消息连续到达。
-- 畸形 JSON 返回 `id:null`、`code:-32700`，诊断写 `errorOutput`；示例把它接到 `process.stderr`。
-- stdout 只写协议帧。启动、临时目录、停止日志全部写 stderr。
+- `src/adapters/mcp-tool.ts`：通用远端 Tool 投影、显式别名/参数映射、结果与错误转换。
+- `src/tools/filesystem-backend.ts`：`local` / `mcp` 工厂和 filesystem 专用安全投影。
+- `src/adapters/mcp-stdio-client.ts`：复用 D035 Client；本日没有另写一套 JSON-RPC Client。
+- `src/demo/d037.ts`：真实 Loop 双后端对比。
 
-## Registry 适配，而不是复制工具逻辑
+## 如何切换后端
 
-Server 构造时同时接收 `registry` 和显式 `toolNames`：
+### local：现有自研文件工具
 
 ```ts
-const registry = new ToolRegistry();
-registry.register(readFileTool);
-registry.register(listDirTool);
+import { createFilesystemBackend } from './src/tools/filesystem-backend.ts';
 
-const server = new McpStdioServer({
-  registry,
-  toolNames: ['read_file', 'list_dir'],
-  workspaceRoot,
-  input: process.stdin,
-  output: process.stdout,
-  errorOutput: process.stderr,
-  serverInfo: { name: 'personal-agent-safe-demo', version: '0.1.0' },
-});
-await server.start();
-```
-
-### tools/list
-
-对每个被明确选择的名称调用 `registry.describe(name)`，直接投影：
-
-```text
-Tool.name        → MCP tool.name
-Tool.description → MCP tool.description
-Tool.parameters  → MCP tool.inputSchema
-```
-
-未注册或 Registry 策略不可见的工具不会列出。没有伪造 `outputSchema`，本日也不发布 `listChanged` 通知，因此声明 `{ tools: { listChanged: false } }`。
-
-### tools/call 与 JSON 字符串参数
-
-1. MCP 外层 `params.name` 必须是字符串，`params.arguments` 省略时按 `{}`，提供时必须是 JSON object。
-2. 调用前检查显式 `toolNames` 和 Registry 可见性；未选择、未知或不可见工具按协议返回 `-32602 Unknown tool`。
-3. 用 `JSON.stringify(arguments)` 生成 **Registry ToolCall.arguments 的 JSON 字符串**，同时生成带 MCP id 类型的 ToolCall id。
-4. 真正调用 `registry.execute(toolCall, { workspaceRoot, signal })`。没有第二份文件工具、权限或 Schema 逻辑。
-5. Registry 自己完成 JSON 解析、Schema 校验、策略和 Tool 执行；Tool 最终收到的是 Registry 校验后的参数值。
-
-因此，MCP 调用者传对象；Registry 边界仍保持 D027/D035 已验证的 JSON 字符串契约。
-
-## ToolResult 与错误映射
-
-| 场景 | 对外结果 |
-|---|---|
-| 工具成功 | `content:[{type:"text",text:result.content}]`，`isError:false` |
-| Registry Schema 失败，如 `INVALID_ARGUMENTS` | 工具结果 `isError:true`，不是 JSON-RPC transport error |
-| 文件不存在、路径越界等 ToolError | 工具结果 `isError:true`，保留原 content 和错误元数据 |
-| 敏感工具未确认，如 `TOOL_CONFIRMATION_REQUIRED` | 工具结果 `isError:true`；示例不会自动批准 |
-| MCP 外层 name/arguments 形状错误 | JSON-RPC `-32602 Invalid params` |
-| 未知、未选择或策略不可见工具 | JSON-RPC `-32602 Unknown tool`，不泄露隐藏工具 |
-| 未知方法 | JSON-RPC `-32601 Method not found` |
-| 非法信封 / 重复 initialize | JSON-RPC `-32600 Invalid Request` |
-| 畸形 JSON | JSON-RPC `-32700 Parse error`，`id:null` |
-| Registry 意外抛异常 | JSON-RPC `-32603 Internal error`，不把内部异常文本发给 Client |
-
-带 `ToolResult.error` 时，额外返回：
-
-```json
-{
-  "structuredContent": {
-    "error": {
-      "code": "FILE_NOT_FOUND",
-      "message": "...",
-      "hint": "...",
-      "details": {}
-    }
-  }
+const backend = await createFilesystemBackend({ backend: 'local' });
+try {
+  // 把 backend.registry 注入现有 runAgentLoop。
+  const tools = backend.registry.list(); // read_file, list_dir
+} finally {
+  await backend.close();
 }
 ```
 
-实际字段按原对象保留，未出现的可选字段不会凭空补出。成功结果没有可靠的结构化业务数据，所以只返回文本 content 和 `isError:false`，不假装解析出 `structuredContent`。
+`local` 直接注册现有 `readFileTool`、`listDirTool`，没有复制实现。
 
-## 并发、取消与关闭
+### mcp：官方 filesystem Server
 
-- 读循环不 `await` 长工具；每次 `tools/call` 都独立执行，响应按完成顺序写出。
-- id 以 `类型 + 值` 建立内部键，避免 JSON-RPC 的 `1` 与 `"1"` 碰撞；响应始终使用原始 id。
-- 慢调用不阻塞后续快调用、ping 或取消通知；测试断言慢请求先发送、快请求先完成且 id 配对正确。
-- `notifications/cancelled` 找到在途 id 后调用真实 `AbortController.abort()`，同一 signal 已传给 Registry/Tool；取消后的迟到结果不会再写回。
-- 工具必须监听 `context.signal` 才能真正中止自身工作。对不合作、永不完成的 Tool，协议层不能强制收回其 Promise；未知取消 id 不产生错误响应。
-- stdio 关闭时 abort 所有在途调用、清空活动表、停止后续写响应。清理不依赖再收到一个非标准 shutdown 方法。
+```ts
+import { StdioMcpClient } from './src/adapters/mcp-stdio-client.ts';
+import { createFilesystemBackend } from './src/tools/filesystem-backend.ts';
 
-## 安全示例边界
+const client = new StdioMcpClient({
+  command: 'npx',
+  args: [
+    '--yes',
+    '@modelcontextprotocol/server-filesystem@2025.11.25',
+    '/显式/允许的/workspace',
+  ],
+  requestTimeoutMs: 30_000,
+  closeTimeoutMs: 2_000,
+});
+const backend = await createFilesystemBackend({ backend: 'mcp', client });
+try {
+  // 与 local 完全相同的 Registry 注入点。
+} finally {
+  await backend.close(); // 幂等；D035 Client 负责 EOF/SIGTERM 与超时兜底。
+}
+```
 
-`src/demo/d036-mcp-server.ts` 每次启动：
+工厂执行 `connect → listAllTools → 校验 read_file/list_directory → 注册投影`。缺少必要工具或握手失败时会主动 `close()`。Demo 还给官方进程只传递 `PATH`、`HOME` 等启动所需环境，不读取模型、Git 或云服务凭证。
 
-1. 在系统临时目录创建独立工作区。
-2. 只写入固定 `README.txt` 和 `hello.txt` 示例内容。
-3. 只注册并允许 `read_file`、`list_dir`。
-4. 不暴露 `shell`、任意命令、写文件、编辑文件、网络、进程环境变量或凭证工具。
-5. 继续沿用现有工作区路径逃逸防护；stdio 关闭后递归删除临时目录。
+## 显式别名与路径映射
 
-测试中的 `shell` 调用得到 `Unknown tool`，不是把命令转交给 run_command。不要把本示例改成默认暴露整个生产 Registry；暴露新工具需要显式加入 `toolNames` 并单独评估权限。
+官方读工具叫 `read_file`，列目录工具叫 `list_directory`，且都要求绝对路径；本项目既有模型契约使用 `read_file` / `list_dir` 和工作区相对路径。filesystem 投影因此是显式的，而不是按名称猜测：
+
+| Registry 暴露 | MCP 实际调用 | 参数转换 |
+| --- | --- | --- |
+| `read_file` | `read_file` | `{path:'note.txt'}` → `{path:'/allowed/workspace/note.txt'}` |
+| `list_dir` | `list_directory` | `{}` → `{path:'/allowed/workspace'}` |
+
+转换前复用 `resolveInWorkspace`，所以 `../secret` 在本地边界得到 `PATH_OUTSIDE_WORKSPACE`，请求不会到达外部 Server。官方 Server 的 allowed directory 同时被限制为同一个临时/显式工作区，形成第二层防护。
+
+通用适配器默认保留远端名称、description 和 `inputSchema`；filesystem 工厂为了维持既有 Agent 契约，**有意覆盖**公开名称、description 和 Schema，并在上述调用边界转换参数。这不是暗中改变语义。
+
+即使官方 Server 还列出 `write_file` 等工具，工厂也只挑选这两个只读能力。未知 `write_file`、`shell` 等调用由 Registry 返回 `UNKNOWN_TOOL`，不会转发。
+
+## 哪些语义保持一致，哪些天然不同
+
+### 保持一致
+
+- Loop/模型看到相同的 `read_file`、`list_dir` 名称、description、公开 JSON Schema 和相对路径约定。
+- Registry 继续负责 JSON 解析、Schema 校验、未知工具和权限边界；非法 JSON/参数不会进入 MCP。
+- 两种后端都返回 `ToolResult`，Loop 的消费方式不变。
+- 本地 `ToolError`（例如路径逃逸）保留原错误码；远端结构化错误若使用本项目已知错误码，会保留 code/message/hint/retryable。
+- 正常文本 content、`isError` 和结构化错误都有受测转换。
+
+### 不假装完全一致
+
+- **列目录格式不同**：local 使用 `nested/`、`note.txt`；官方使用 `[DIR] nested`、`[FILE] note.txt`。
+- **读取限制/提示不同**：local 保留自身的行数、字节和超长截断提示；官方 Server 可能有自己的大文件策略和文案。
+- **错误文案和细分码不同**：本地文件错误来自自研 Tool；官方普通失败常是 `isError + text`，映射为 `MCP_TOOL_ERROR`，不会伪装成完全相同的本地异常。
+- MCP 非文本 content block 以 JSON 文本拼入 `ToolResult.content`；当前 Tool 契约没有二进制内容通道。
+- 成功结果的 `structuredContent` 不被伪造为额外 Tool 字段；本日结构化转换重点是 `structuredContent.error`。
+- 协议和进程故障有额外的稳定错误码：`MCP_RPC_ERROR`、`MCP_TRANSPORT_ERROR`；请求超时/取消沿用 `TOOL_TIMEOUT` / `TOOL_CANCELLED`。
+
+因此，切换保证的是**工具入口和 Loop 契约一致**，不是输出字节或所有错误细节完全一致。
+
+## 对比 Demo
+
+```bash
+npm run demo:d037
+```
+
+`src/demo/d037.ts` 创建一个临时工作区，写入相同的 `note.txt` 和 `nested/`，然后用同一个确定性脚本 ModelProvider 分别运行两个真实 `AgentLoop`。它不是直接调用脚本函数冒充 Harness 集成，也不需要模型 API Key。
+
+每次调用输出：
+
+- `backend=local|mcp`；
+- Loop 看到的 `exposed` 工具名与原始 `args`；
+- 实际远端 `remote` 工具名与 `remoteArgs`；
+- 结果摘要和 `isError`；
+- 协商协议、Server 名称/版本和 `closed=true`。
+
+本次官方结果：两种后端读取到相同 `D037 shared workspace\n`，列目录格式如上述表格不同；MCP 记录明确显示 `list_dir {} → list_directory {path:<临时绝对路径>}`。最后删除临时目录并输出 `workspaceRemoved=true`。
+
+默认测试通过依赖注入使用本地 stdio fixture，保持离线确定；官方 Demo 是另外实际执行过的验收，**没有用自研 D036 Server 替代官方验证**。
+
+## 错误与生命周期验收
+
+- MCP `isError`：保留文本；识别并保留结构化 ToolError，否则得到 `MCP_TOOL_ERROR`。
+- JSON-RPC error：转换成 `MCP_RPC_ERROR`，不悬挂 Loop。
+- 请求超时：D035 Client 有界等待，适配为 `TOOL_TIMEOUT`。
+- 子进程退出：在途请求被拒绝并适配为 `MCP_TRANSPORT_ERROR`，之后仍能关闭。
+- 未知工具、路径逃逸：在外部调用前拦截。
+- 初始化能力不完整：关闭 Client 并拒绝构造不完整后端。
+- 后端 `close()` 幂等；Demo 每个后端都在 `finally` 中关闭，工作区也在 `finally` 中删除。
 
 ## TDD 实录
 
-新行为先写测试并观察预期失败，再补实现：
+本日新行为遵循 RED → GREEN：
 
-1. **握手 RED**：`npx vitest run test/d036-mcp-server.test.ts` 首先因 `mcp-stdio-server.ts` 不存在而失败；最小实现后 initialize/版本/ping **2 项通过**。
-2. **Registry/协议 RED**：重复 initialize 仍返回成功、tools/list/call 无响应、未知方法无错误响应；补 Registry 投影和错误映射后转绿。测试还校正了两个历史契约理解：Registry 在 Tool 执行前解析 JSON；敏感标记使用 `{sensitive:true}` 注册选项。
-3. **并发/关闭 RED**：实际观察到畸形 JSON `SyntaxError`、非法 tools/list 参数返回工具列表、取消/关闭时 `aborted=false`；补 Parse error、参数校验、活动调用表和 AbortSignal 后 **15 项通过**。并发乱序测试验证了已有的非阻塞设计，未为通过测试而串行化。
-4. **示例 RED**：跨进程测试首次因子进程入口不存在报 `spawn ENOENT`；加入安全示例后，握手、真实 read_file、错误与关闭测试转绿。
+1. **通用适配 RED**：先写 `test/d037-mcp-tool.test.ts`，因 `mcp-tool.ts` 不存在而失败。最小实现后覆盖 Schema、对象参数、文本/非文本 content、`isError`、结构化错误、JSON-RPC、超时、取消和传输错误。
+2. **别名 RED**：新增显式投影测试时实际出现 `1 failed / 4 passed`；补 `McpToolProjection` 后，确认 Registry 只看到本地名称/Schema，而 Client 收到远端名称/映射参数。
+3. **filesystem 后端 RED**：`test/d037-filesystem-backend.test.ts` 首先因工厂模块不存在失败；最小实现后，路径逃逸测试进一步促成 `ToolError` 原样转换。最终覆盖只读工具集合、绝对路径、切换、缺失能力和幂等关闭。
+4. **stdio 组合验收**：真实本地 fixture 跑通握手、Registry 调用、超时和进程退出。全套高并发检查曾让 100ms 的握手先于目标超时路径失败，因此将 fixture 请求超时调为 1 秒；仍断言工具超时 2 秒内返回。
+5. **Demo RED**：`test/d037-demo.test.ts` 首先因 `src/demo/d037.ts` 不存在失败；实现后双后端真实 Loop、实际远端参数、关闭和清理测试转绿。测试中的 stop reason 按既有 Loop 契约使用 `completed`，没有为本日改写 Loop。
 
-最终完整验证：
+最终验证：
 
-```bash
-npm run check
-npm run test:coverage
+```text
+npm run check          → 44 个测试文件，393 项测试全部通过
+npm run test:coverage  → 44 个测试文件，393 项测试全部通过
 ```
 
-本次覆盖率实跑：**40 个测试文件、376 项测试全部通过**；全项目 statements **92.08%**、branches **87.90%**、functions **99.33%**、lines **93.76%**，达到现有阈值。新增 Server 文件 statements **90.90%**、lines **94.95%**。
+全项目覆盖率：statements **92.37%**、branches **87.59%**、functions **99.09%**、lines **94.02%**。新增 `mcp-tool.ts` statements/lines 均 **100%**，`filesystem-backend.ts` statements/lines 均 **100%**，`d037.ts` statements **93.93%**、lines **96.55%**。
+
+## 文件清单
+
+- `src/adapters/mcp-tool.ts`
+- `src/tools/filesystem-backend.ts`
+- `src/demo/d037.ts`
+- `scripts/d037-compare.ts`
+- `test/d037-mcp-tool.test.ts`
+- `test/d037-filesystem-backend.test.ts`
+- `test/d037-stdio-integration.test.ts`
+- `test/d037-demo.test.ts`
+- `test/fixtures/d037-filesystem-server.ts`
+- `evidence/d037-transcript.txt`
+
+`src/core/tool.ts` 只增加 MCP 错误码，`package.json` 只增加 `demo:d037`。主 `src/index.ts` 和既有 CLI 默认后端未改；切换由本日工厂显式注入。
 
 ## 限制
 
-- 只实现 MCP `2025-11-25` 的 stdio、initialize/ping/tools 生命周期；不实现 HTTP、WebSocket、2026-07-28。
-- 不实现 resources、prompts、sampling、roots、elicitation、logging、pagination 或动态 listChanged。
-- tools/list 一次返回显式选择的小集合；不提供游标分页。
-- 成功 ToolResult 只有文本 content；本日不声明 outputSchema，不推导成功 structuredContent。
-- stdio 是单 Client 会话；没有网络监听和传输层认证。安全边界来自本机进程隔离、显式工具集合和 Registry/工作区策略，而不是把 stdio 当成多租户服务。
-- 取消与关闭传递真实 AbortSignal，但强制终止非合作工具不是 JSON-RPC 能做到的；生产工具应检查 signal 并清理自己的子进程/定时器。
+- 只接 filesystem 的 `read_file` / `list_directory`，不开放写、移动、删除、搜索或 shell 工具。
+- 只验证 MCP `2025-11-25` stdio；没有 HTTP/WebSocket 传输，也没有扩展其他协议版本。
+- 官方包精确固定为 `2025.11.25`；升级时需重新核对工具 Schema、allowed-directory 行为和协议兼容性。
+- `npx` 首次执行需要网络；离线 CI 使用本地 fixture，正式官方验收仍需显式运行 Demo。
+- 本日交付的是 filesystem Registry 工厂，不是全局配置迁移；现有 CLI 和其他内置工具保持原行为。
+- stdio 本机进程隔离不等于多租户安全边界。生产接入仍需审计外部包、工作区权限、输出内容和资源限制。
