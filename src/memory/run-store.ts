@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
-import type { StopReason } from '../runtime/loop.ts';
+import type { AgentLoopResult, StopReason } from '../runtime/loop.ts';
 
 export type RunStatus = 'running' | 'completed' | 'interrupted' | 'failed';
 
@@ -10,6 +10,8 @@ export interface RunRecord {
   readonly sessionId: string;
   readonly status: RunStatus;
   readonly stopReason?: StopReason;
+  readonly userMessage?: string;
+  readonly result?: AgentLoopResult;
   readonly startedAt: string;
   readonly updatedAt: string;
 }
@@ -17,11 +19,12 @@ export interface RunRecord {
 export interface StartRun {
   readonly id?: string;
   readonly sessionId: string;
+  readonly userMessage?: string;
 }
 
 export interface RunStore {
   start(run: StartRun): RunRecord;
-  finish(id: string, stopReason?: StopReason): RunRecord;
+  finish(id: string, stopReason?: StopReason, result?: AgentLoopResult): RunRecord;
   fail(id: string): RunRecord;
   get(id: string): RunRecord | undefined;
   list(sessionId?: string): RunRecord[];
@@ -44,12 +47,22 @@ function isStopReason(value: unknown): value is StopReason {
   return value === 'completed' || value === 'max_turns' || value === 'cancelled' || value === 'tool_errors';
 }
 
+function parseResult(json: string): AgentLoopResult {
+  try {
+    return JSON.parse(json) as AgentLoopResult;
+  } catch (error) {
+    throw new RunStoreError('Run 完成结果数据损坏', { cause: error });
+  }
+}
+
 function toRunRecord(row: Record<string, unknown>): RunRecord {
   if (
     typeof row.id !== 'string' ||
     typeof row.session_id !== 'string' ||
     !isStatus(row.status) ||
     (row.stop_reason !== null && !isStopReason(row.stop_reason)) ||
+    (row.user_message !== null && typeof row.user_message !== 'string') ||
+    (row.result_json !== null && typeof row.result_json !== 'string') ||
     typeof row.started_at !== 'string' ||
     typeof row.updated_at !== 'string'
   ) {
@@ -60,6 +73,8 @@ function toRunRecord(row: Record<string, unknown>): RunRecord {
     sessionId: row.session_id,
     status: row.status,
     ...(row.stop_reason === null ? {} : { stopReason: row.stop_reason }),
+    ...(row.user_message === null ? {} : { userMessage: row.user_message }),
+    ...(row.result_json === null ? {} : { result: parseResult(row.result_json) }),
     startedAt: row.started_at,
     updatedAt: row.updated_at,
   };
@@ -78,9 +93,20 @@ export class SqliteRunStore implements RunStore {
         status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'interrupted', 'failed')),
         stop_reason TEXT,
         started_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        user_message TEXT,
+        result_json TEXT
       );
     `);
+    const columns = new Set(
+      this.database.prepare('PRAGMA table_info(runs)').all().map((column) => column.name),
+    );
+    if (!columns.has('user_message')) {
+      this.database.exec('ALTER TABLE runs ADD COLUMN user_message TEXT');
+    }
+    if (!columns.has('result_json')) {
+      this.database.exec('ALTER TABLE runs ADD COLUMN result_json TEXT');
+    }
   }
 
   start(run: StartRun): RunRecord {
@@ -89,22 +115,23 @@ export class SqliteRunStore implements RunStore {
     const timestamp = new Date().toISOString();
     this.database
       .prepare(
-        `INSERT INTO runs (id, session_id, status, stop_reason, started_at, updated_at)
-         VALUES (?, ?, 'running', NULL, ?, ?)`,
+        `INSERT INTO runs (id, session_id, status, stop_reason, started_at, updated_at, user_message)
+         VALUES (?, ?, 'running', NULL, ?, ?, ?)`,
       )
-      .run(id, run.sessionId, timestamp, timestamp);
+      .run(id, run.sessionId, timestamp, timestamp, run.userMessage ?? null);
     return {
       id,
       sessionId: run.sessionId,
       status: 'running',
+      ...(run.userMessage === undefined ? {} : { userMessage: run.userMessage }),
       startedAt: timestamp,
       updatedAt: timestamp,
     };
   }
 
-  finish(id: string, stopReason: StopReason = 'completed'): RunRecord {
+  finish(id: string, stopReason: StopReason = 'completed', result?: AgentLoopResult): RunRecord {
     this.assertOpen();
-    this.finishTransition(id, 'completed', stopReason);
+    this.finishTransition(id, 'completed', stopReason, result);
     return this.require(id);
   }
 
@@ -157,14 +184,25 @@ export class SqliteRunStore implements RunStore {
     this.closed = true;
   }
 
-  private finishTransition(id: string, status: 'completed' | 'failed', stopReason: StopReason | null): void {
-    const result = this.database
+  private finishTransition(
+    id: string,
+    status: 'completed' | 'failed',
+    stopReason: StopReason | null,
+    result?: AgentLoopResult,
+  ): void {
+    const transition = this.database
       .prepare(
-        `UPDATE runs SET status = ?, stop_reason = ?, updated_at = ?
+        `UPDATE runs SET status = ?, stop_reason = ?, result_json = ?, updated_at = ?
          WHERE id = ? AND status = 'running'`,
       )
-      .run(status, stopReason, new Date().toISOString(), id);
-    if (result.changes === 0) {
+      .run(
+        status,
+        stopReason,
+        result === undefined ? null : JSON.stringify(result),
+        new Date().toISOString(),
+        id,
+      );
+    if (transition.changes === 0) {
       throw new RunStoreError(`Run "${id}" 不存在或已结束`);
     }
   }
