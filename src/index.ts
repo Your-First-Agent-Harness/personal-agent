@@ -7,6 +7,12 @@ export type { G1DemoReport } from './demo/g1.ts';
 export { runAgentLoop } from './runtime/loop.ts';
 export type { AgentLoopOptions, AgentLoopResult } from './runtime/loop.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
+export type {
+  ToolCircuitBreakerOptions,
+  ToolRateLimitOptions,
+  ToolResilienceOptions,
+  ToolRetryOptions,
+} from './tools/resilience.ts';
 export { ToolRegistry } from './tools/registry.ts';
 export type {
   SensitiveToolConfirmation,
