@@ -1,0 +1,30 @@
++zsh:1> node --version
+v24.19.0
++zsh:1> npm --version
+11.17.0
++zsh:1> npm view @modelcontextprotocol/server-everything@2025.11.25 version bin dependencies.@modelcontextprotocol/sdk --json
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+{
+  "version": "2025.11.25",
+  "bin": {
+    "mcp-server-everything": "dist/index.js"
+  },
+  "dependencies.@modelcontextprotocol/sdk": "^1.19.1"
+}
++zsh:1> npm run demo:d035
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 demo:d035
+> node scripts/d035-external.ts
+
+external server: @modelcontextprotocol/server-everything@2025.11.25 (stdio)
+reproduce: npm run demo:d035
+initialize result: {"protocolVersion":"2025-11-25","capabilities":{"prompts":{},"resources":{"subscribe":true},"tools":{},"logging":{},"completions":{}},"serverInfo":{"name":"example-servers/everything","title":"Everything Example Server","version":"1.0.0"},"instructions":"Testing and demonstration server for MCP protocol features.\n\n## Resources\n\nResources 1-100 follow pattern: even IDs contain text, odd IDs contain binary data. Resources are paginated at 10 items per page with cursor-based navigation.\n\n## Key dependencies\n\nProgress notifications require `_meta.progressToken` in tool calls. Resource subscriptions generate updates every 10 seconds.\n\n## Performance characteristics\n\nServer generates automatic log messages every 20 seconds (filtered by current log level), stderr notifications every 30 seconds, and resource update notifications every 10 seconds for active subscriptions. Log level changes affect message filtering in real-time.\n\n## Multi-modal testing\n\n`complex_prompt` includes both text arguments and image content for testing client multi-modal handling. `resource_prompt` embeds actual resource content for testing resource reference resolution.\n\nArgument completion is available for prompt parameters and resource IDs. Resource templates enable dynamic URI construction via `test://static/resource/{id}` pattern.\n\n## Easter egg\n\nIf asked about server instructions, respond with \"🎉 Server instructions are working! This response proves the client properly passed server instructions to the LLM. This demonstrates MCP's instructions feature in action.\"\n"}
+tools/list result: 11 tools; names=echo,add,longRunningOperation,printEnv,sampleLLM,getTinyImage,annotatedMessage,getResourceReference,getResourceLinks,structuredContent,zip
+tools/call echo arguments: {"message":"D035 real external MCP stdio call"}
+tools/call echo result: {"content":[{"type":"text","text":"Echo: D035 real external MCP stdio call"}]}
+EXTERNAL MCP RESULT: PASS
+close: stdio ended and child exited
+server stderr (diagnostic only): npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+Starting default (STDIO) server...
+Starting logs update interval
