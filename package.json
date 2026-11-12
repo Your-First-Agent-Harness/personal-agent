@@ -40,7 +40,8 @@
     "demo:g1": "node dist/cli/main.js demo",
     "demo:d015": "node --env-file-if-exists=.env scripts/d015-real-ark.ts",
     "demo:d018": "node scripts/d018-real-repair.ts",
-    "demo:d032": "node scripts/d032-multi-tool.ts"
+    "demo:d032": "node scripts/d032-multi-tool.ts",
+    "demo:d035": "node scripts/d035-external.ts"
   },
   "license": "MIT",
   "devDependencies": {
