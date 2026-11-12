@@ -1,19 +1,42 @@
 {
   "name": "personal-agent",
-  "version": "0.1.0-dev",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A from-scratch Agent Harness: pluggable tools, MCP, context engineering, observability, evals.",
+  "description": "A from-scratch Agent Harness with pluggable tools and an offline G1 demo.",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
+  },
+  "files": [
+    "dist",
+    "docs/install.md",
+    "docs/releases/v0.1.0.md"
+  ],
+  "bin": {
+    "personal-agent": "./dist/cli/main.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./demo": {
+      "types": "./dist/demo/g1.d.ts",
+      "import": "./dist/demo/g1.js"
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
     "dev": "node --env-file-if-exists=.env src/cli/main.ts",
+    "build": "tsc -p tsconfig.build.json",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:acceptance": "node scripts/verify-g1-install.ts",
     "check": "npm run lint && npm run typecheck && npm run test",
+    "prepack": "npm run build",
+    "demo:g1": "node dist/cli/main.js demo",
     "demo:d015": "node --env-file-if-exists=.env scripts/d015-real-ark.ts",
     "demo:d018": "node scripts/d018-real-repair.ts"
   },

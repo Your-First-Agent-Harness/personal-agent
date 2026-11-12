@@ -1,0 +1,60 @@
+确定性离线 Demo：脚本化 ModelProvider 不请求网络、不需要 API Key；所有文件和命令均由真实工具执行。
+[1/4] read_file 读取 math.js：
+export function add(left, right) {
+  return left - right;
+}
+[2/4] run_command 修复前测试，exitCode=1（预期失败）：
+✖ add returns the sum (0.605291ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 39.971666
+
+✖ failing tests:
+
+test at math.test.js:5:1
+✖ add returns the sum (0.605291ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  -1 !== 5
+
+      at TestContext.<anonymous> (file:///private/tmp/personal-agent-g1-demo-s5lbx8/math.test.js:6:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.start (node:internal/test_runner/test:1242:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: -1,
+    expected: 5,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+[3/4] edit_file 真实修改：
+--- a/math.js
++++ b/math.js
+@@ -1,4 +1,4 @@
+ export function add(left, right) {
+-  return left - right;
++  return left + right;
+ }
+[4/4] run_command 修复后测试，exitCode=0（预期通过）：
+✔ add returns the sum (0.293542ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 36.586875
+最终 math.js：
+export function add(left, right) {
+  return left + right;
+}
+断言通过：修复前测试 exitCode=1，修复后 exitCode=0，最终文件已改为加法。
+G1 Demo PASS：真实 read_file → edit_file → run_command 工具链完成；临时工作区已清理。

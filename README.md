@@ -1,187 +1,165 @@
-# Personal Agent · D024 可靠性修复与复审
+# D025：打包 v0.1.0，完成 G1 安装级验收
 
-> 计划日期：2026-12-04
-> 日分支：`D024`
-> 基线：`D023` / `ef0cad7`
-> 任务：D24「可靠性修复：对齐任务卡的可靠性要求」
+计划日期：2026-12-05
+基线：D024 `483b48c`
+任务卡：D25「打包 v0.1.0」——陌生人装包后，能跑通真实 read → edit → run_command 三工具 Demo。
 
-本日只做可靠性审计、可证明的最小修复、进程测试加固和安装文档。没有合并 `main`，没有执行 D025，也没有发布 npm / GitHub release。
+> 结论：D024 的“源码 tarball 只能检查元数据”不再是终点。D025 输出编译后的原生 ESM 包，并实际完成 `npm pack` → 全新 `/tmp` 目录离线安装 → 从安装目录执行 bin → 读取、修改、测试及最终文件断言。
 
-## 1. 从安装到验证
+## 1. 发布阻断与 TDD RED
 
-第一次接触仓库时，先读 **[安装与本地打包验证](docs/install.md)**。文档包含：
-
-- Node.js 24 准备、克隆与分支切换、按锁文件执行 `npm ci`；
-- 仅含占位符的配置示例，以及不需要模型密钥的检查方式；
-- `npm run check`、`npm run test:coverage`；
-- `npm pack`、干净临时目录安装 tarball、包元数据与原生 SQLite 冒烟；
-- 旧 Node.js 的 `node:sqlite` 模块、实验开关和路径问题。
-
-源码开发的最小命令：
+D024 包没有 bin，仍把 `src/**/*.ts` 作为运行入口。D025 开始前先原样执行其 tarball：
 
 ```bash
-npm ci
-cp .env.example .env
-npm run check
-npm run test:coverage
+npm pack --pack-destination /tmp/personal-agent-d025-red
+npm install --prefix /tmp/personal-agent-d025-red/install \
+  /tmp/personal-agent-d025-red/personal-agent-0.1.0-dev.tgz
+node /tmp/personal-agent-d025-red/install/node_modules/personal-agent/src/cli/main.ts "offline red"
 ```
 
-只有真实调用模型时才需要在本地 `.env` 填写有效密钥。本日测试和打包验证没有读取或打印真实 `.env`，也没有请求真实模型服务。
+安装可以完成，但 CLI 在业务逻辑前失败：
 
-## 2. 可靠性审计清单
+```text
+node:internal/modules/typescript:70
+throw new ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING(...)
+Error [ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING]: Stripping types is currently
+unsupported for files under node_modules, for "package/src/cli/main.ts"
+```
 
-审计范围是 D021–D023 新增的持久化与进程恢复路径，而不是泛化重构整个项目。
+随后先写两项自动化验收并观察失败：
 
-| 检查项 | 证据与结论 | 本日处理 |
-| --- | --- | --- |
-| D021 Message 数据边界 | `session-store.ts` 已校验角色、内容、ToolCall 及位置；非法 JSON、非法结构、位置错误均显式报错 | 保留现有行为，无需修改 |
-| D021 Session 保存事务 | `save` 在同一事务内校验身份、替换消息并提交；异常路径回滚 | 回归测试通过，无需修改 |
-| D022 Run 状态与 tool-log | `addIfAbsent` 事务保护 Run 与工具日志；`start` 原子幂等；`finish` 校验状态 | 回归测试通过，无需修改 |
-| D022/D023 迁移 | D022 旧表补列测试与 D023 旧 `runs` 表补 `result_json` 测试均存在，迁移 SQL 由生产构造函数执行 | 补列迁移测试通过，无另建迁移框架 |
-| D023 `result_json` 反序列化 | 原实现只做 `JSON.parse` 后类型强转；合法 JSON 的 `null`、缺字段对象、坏 ToolCall 等会伪装成 `AgentLoopResult` | **确认缺陷并最小修复** |
-| 事务与关闭 | 定向复审 `begin/commit/rollback`、Store/Service `close`、测试临时目录清理；未发现可稳定证明的新问题 | 不为假想问题改生产代码 |
-| 进程 `error` / `exit` / `close` | 生产 `run-command.ts` 用 `close` 汇总 stdio，`finish` 只完成一次，并清理 timeout 与 abort listener | 生产行为不变，加固测试握手 |
-| D022/D023 子进程夹具 | 复用 PID ready、存活定时器、进程退出及 `stopChild` 清理；SIGKILL 后不能残留只写工具日志的进程 | 沿用现有夹具，不复制新框架 |
+1. `test/d025-offline-demo.test.ts` 要求无 API Key 的 `demo --json` 返回真实工具证据；RED 时旧 CLI 把 `demo` 当模型任务并以状态 `1` 退出。
+2. `test/d025-package.test.ts` 要求独立安装验收脚本成功；RED 时脚本不存在，退出状态为 `1`。
 
-### 本日修复的持久化边界
+只有这两个行为测试失败后，才开始生产改动。公开版本常量的测试也先观察到 `undefined ≠ 0.1.0`，再补实现。
 
-`src/memory/run-store.ts` 现在只有完成 Run 的 `result` 非空时才解析 `result_json`，并在返回前验证：
+## 2. 最小构建与打包方案
 
-- 顶层必须是对象，`messages` 必须是合法 Message 数组；
-- Message 的角色、文本、ToolCall `id/name/arguments`、可选工具字段必须符合类型；
-- `text` 必须是字符串，`turns` 必须是非负整数；
-- `stopReason` 必须属于既有停止原因；
-- `usage.inputTokens/outputTokens` 必须是非负整数。
+`tsconfig.build.json` 继承开发配置，只增加发布所需选项：
 
-语法损坏或结构损坏都抛出 `RunStoreError('Run 完成结果数据损坏')`。本日只拒绝坏数据，不自动修复、丢弃或改写历史 Run。
+- `rootDir: src`、`outDir: dist`，输出原生 ESM JavaScript 和 `.d.ts`；
+- `rewriteRelativeImportExtensions: true`，把 dist 内的相对 `.ts` 导入重写为 `.js`；
+- 保持零运行时依赖、Node 24、ESM；没有 tsx、ts-node、bundler 或运行时 transpiler；
+- 开发测试仍直接导入 `src/**/*.ts`，开发 typecheck 配置不改。
 
-## 3. RED → GREEN 证据
+包配置：
 
-### RED：先证明反序列化缺陷
+| 项目 | v0.1.0 |
+|---|---|
+| 版本 | `0.1.0`；npm 仍为 `private`，不发布 registry |
+| bin | `personal-agent` → `dist/cli/main.js` |
+| exports | 根入口、`personal-agent/demo`、`package.json`，附类型声明 |
+| scripts | `build`、`demo:g1`、`test:acceptance`、`prepack` |
+| Node | `>=24` |
+| 运行时依赖 | 无 |
 
-在未修改生产代码时，先向 `test/d023-idempotency.test.ts` 加入 7 类“JSON 合法、结构非法”的 `result_json`：
+`prepack` 自动构建，避免旧 dist 混入 tarball。
 
-1. 顶层 `null`；
-2. 缺少 `usage`；
-3. `messages` 不是数组；
-4. ToolCall 缺少 `arguments`；
-5. `turns` 为小数；
-6. 非法 `stopReason`；
-7. `usage` 缺少字段。
+## 3. 包内容
 
-执行：
+允许进入 tarball：
+
+- `dist/**/*.js` 与 `dist/**/*.d.ts`；
+- `package.json`、README、LICENSE；
+- `docs/install.md`、`docs/releases/v0.1.0.md`。
+
+明确排除：`src`、`test`、`scripts`、`coverage`、`.env*`、SQLite/运行数据、仓库 dev `node_modules`、tarball 和临时目录。安装验收脚本会在安装后逐项检查这些边界，并通过根 exports 导入 `VERSION`、`ToolRegistry` 和五个内置工具。
+
+## 4. G1 Demo 不是 mock 工具结果
+
+入口：
 
 ```bash
-npm test -- test/d023-idempotency.test.ts
+personal-agent demo
+# 或需要自动化断言时
+personal-agent demo --json
 ```
 
-7 个新增用例全部按预期 RED：测试期望 `RunStoreError`，原实现却没有抛错并返回了损坏记录。这证明测试击中了缺陷，而不是拼写或夹具错误。
+模型侧是清楚标注的 `deterministic-offline-script`：固定发出四个工具调用，再给出最终文本，不请求网络，也不需要 API Key。工具侧没有替身：
 
-另补的“JSON 语法损坏”用例覆盖原有 catch 防线；它属于现有行为的回归测试，首次通过，不人为制造 RED。
+1. 在 `/tmp/personal-agent-g1-demo-*` 写入有缺陷的真实 `math.js` 和 `math.test.js`；
+2. Agent Loop 经 ToolRegistry 调用 `read_file`，读取磁盘源码；
+3. `run_command` 通过 `/bin/sh -c` 执行真实 `node --test math.test.js`，得到 `exitCode=1`；
+4. `edit_file` 校验 oldText 唯一，把 `return left - right;` 改成 `return left + right;`，返回真实 unified diff；
+5. 第二次 `run_command` 得到 `exitCode=0`；
+6. 从磁盘重新读取最终 `math.js`，断言内容、工具顺序、Loop `completed/5 turns`，最后删除临时工作区。
 
-### GREEN：只修改必要的生产文件
+测试还使用不存在的 Node 命令走真实失败路径，证明不符合“先红后绿”的证据会抛错，而不会打印成功。
 
-增加结构类型守卫后，定向执行持久化与恢复测试，再执行全量测试：
+## 5. 陌生人安装验收
 
 ```bash
-npm test -- test/d023-idempotency.test.ts \
-  test/d022-persistent-runner.test.ts \
-  test/d022-run-store.test.ts test/d021-session-store.test.ts
+RELEASE_DIR="$(mktemp -d /tmp/personal-agent-v010.XXXXXX)"
+npm pack --pack-destination "$RELEASE_DIR"
+npm install --offline --ignore-scripts \
+  --prefix "$RELEASE_DIR/install" \
+  "$RELEASE_DIR/personal-agent-0.1.0.tgz"
+(cd "$RELEASE_DIR/install" && ./node_modules/.bin/personal-agent demo)
 ```
 
-损坏数据用例转为 GREEN，D021–D023 原有幂等、迁移、恢复、事务和消息校验测试保持通过。没有为覆盖率增加生产分支，也没有改动 `src/tools/run-command.ts`。
-
-## 4. 50ms 超时竞态：根因与确定性修复
-
-### 根因
-
-旧测试让生产代码在 `spawn` 时启动 50ms timeout，同时依赖子进程启动后写入 `child.pid`。并行或高负载下，Node 子进程可能尚未完成初始化，timeout 已触发；此时读取 PID、假设 ready 或期待已经产生的 stdout 都处于竞态窗口中。
-
-生产实现已经在子进程 `close` 时收集 stdio，并统一清理 timeout。证据指向测试的启动时序假设，因此只修 `test/run-command.test.ts`。
-
-### 确定性握手
-
-新测试按以下顺序执行：
-
-1. 仅对 `setTimeout` 使用 Vitest 假计时器；
-2. 启动真实子进程，等待有效的 `child.pid` ready 握手；
-3. PID 等待用单调时钟截止时间和 `setImmediate` 让出事件循环，不再固定 sleep 10ms 碰运气；
-4. 确认 ready 后，显式推进假计时器 50ms；
-5. 等待真实进程关闭，断言进程已退出、`timedOut: true` 且 `stdout === 'ready'`；
-6. `afterEach` 恢复真实计时器。
-
-验证结果：
+成功输出包含修复前失败、修复后通过、真实 diff、最终加法源码，以及：
 
 ```text
-定向测试：22/22 通过
-同一文件连续重复 10 轮：220/220 通过
-全量 check 与 coverage 并行运行：该文件均 22/22 通过
+G1 Demo PASS：真实 read_file → edit_file → run_command 工具链完成；临时工作区已清理。
 ```
 
-## 5. 10 次真实 SIGKILL 加固
+完整教学见 [docs/install.md](docs/install.md)。真实模型调用才需要用户自己的 OpenAI 兼容 baseUrl、API Key 和模型名；离线 Demo 不需要。
 
-`test/d023-crash-idempotency.test.ts` 保留原文件名以清晰展示 D023 夹具演进，测试组更新为 D024，并由 5 轮扩为 **10 轮独立真实进程测试**。
+## 6. 可重复自动化证据
 
-每轮都使用全新临时数据库，并完成以下链路：
+```bash
+npm run test:acceptance
+```
 
-1. 进程 1 初始化 Session；
-2. 进程 2 只写 `tool-log` 并靠存活定时器保持运行；
-3. 对进程 2 执行真实 `kill(child.pid, 'SIGKILL')`，断言退出 `signal === 'SIGKILL'`；
-4. 进程 3 恢复，断言没有 tool-result 残留，输出恢复前快照；
-5. 进程 4 使用同一 `runId` 重放，断言输出完全相同；
-6. 每轮分别验证 Messages、Run、`tool-log`、业务工具实际只执行一次，以及进程存活定时器已清理。
+`scripts/verify-g1-install.ts` 独立执行完整流程，不使用仓库源码或仓库 `node_modules` 来冒充安装后的运行：
 
-不是只循环 `spawn`：每一轮都独立断言 signal、恢复状态、消息快照、Run 终态和工具日志一致性，也不靠固定短暂 sleep 判断 ready。
+1. `npm pack`，由 prepack 构建 dist；
+2. 在新的 `/tmp` 目录 `npm install --offline --ignore-scripts <tarball>`；
+3. 检查版本、零运行时依赖、dist 入口和排除内容；
+4. 从安装目录解析根 package exports 并注册五个真实工具；
+5. 从安装目录执行 `.bin/personal-agent demo --json`；
+6. 验证四个工具结果、前后退出码、最终文件与工作区清理；
+7. 打印 `G1_INSTALL_ACCEPTANCE_PASS`，并在 `finally` 删除安装临时目录。
+
+该脚本本身也由 `test/d025-package.test.ts` 在全量测试中实际执行，不是只写在文档里的命令。
+
+## 7. 测试与覆盖率
+
+本分支实际执行：
+
+| 命令 | 结果 |
+|---|---|
+| `npm run check` | ESLint、typecheck、30 个测试文件 / 234 项测试通过 |
+| `npm run test:coverage` | 全部通过，阈值未降低 |
+| `npm run build` | dist ESM 与声明文件生成成功 |
+| `npm run test:acceptance` | 全新目录离线安装及安装后 bin Demo 通过 |
+
+全库覆盖率（语句 / 分支 / 函数 / 行）：
 
 ```text
-npm test -- test/d023-crash-idempotency.test.ts
-Test Files  1 passed
-Tests       10 passed（第 1–10 次全部通过）
+94.36% / 89.75% / 98.79% / 95.13%
+全局阈值：88 / 88 / 90 / 88（未修改）
 ```
 
-该 10 轮文件随后又在全量 `check` 和全量 `coverage` 中各执行一次；本日这三轮自动化共完成 30 次真实 SIGKILL，全部通过。
+新生产文件复审：
 
-## 6. 覆盖率逐文件复审
+| 文件 | 语句 | 分支 | 函数 | 行 |
+|---|---:|---:|---:|---:|
+| `src/demo/g1.ts` | 98.03% | 75% | 100% | 100% |
+| `src/index.ts` | 100% | 100% | 100% | 100% |
 
-全局阈值保持 **statements 80 / lines 80 / functions 80 / branches 75**，未降低任何阈值。逐文件复审按任务要求使用 statements / functions / lines ≥ 80、branches ≥ 75。
+`src/cli/main.ts` 沿用现有 coverage exclude；其 Demo 行为由子进程安装级与源码级测试验证，而非借排除规避三工具核心覆盖率。
 
-实际全量报告：
+## 8. Release Note 与录屏真实状态
 
-| 范围 | Statements | Functions | Lines | Branches | 结论 |
-| --- | ---: | ---: | ---: | ---: | --- |
-| 全部生产文件 | 94.13% | 98.74% | 94.84% | 89.84% | 过全局下限 |
-| `src/memory/run-store.ts`（本日修改） | 91.54%（65/71） | 100%（24/24） | 91.42%（64/70） | 94.38%（84/89） | 过逐文件下限 |
+- 可直接用于 GitHub Release 的说明：[docs/releases/v0.1.0.md](docs/releases/v0.1.0.md)。
+- 变更索引：[CHANGELOG.md](CHANGELOG.md)。
+- 本机检查发现 `/usr/bin/script`，没有 asciinema；因此保存的是[真实终端输出](docs/demos/v0.1.0-terminal.log)，不是 `.cast` 或视频。
+- **本日未制作视频**，没有 mp4、截图、观看量或外部视频链接。终端记录来自已安装 tarball 的 bin，可用上述命令复现。
 
-**本日无新增生产文件。** 唯一修改的生产文件是 `src/memory/run-store.ts`，其 statements / functions / lines 均高于 80，branches 高于 75。数据来自 `coverage/memory/run-store.ts.html` 与本次终端覆盖率汇总；未为凑数字修改生产代码。
+## 9. 限制与发布边界
 
-## 7. 真实全量验证结果
-
-本机环境：Node.js `v24.19.0`，npm `11.17.0`。
-
-| 命令 | 真实结果 |
-| --- | --- |
-| `npm run check` | ESLint、TypeScript、全量测试通过；28 个测试文件、230 项测试 |
-| `npm run test:coverage` | 28 个测试文件、230 项测试通过；全局及上述逐文件指标过线 |
-| 连续 10 轮 `test/run-command.test.ts` | 每轮 22 项，累计 220 项通过 |
-| `npm test -- test/d023-crash-idempotency.test.ts` | 10 次真实 SIGKILL 全部通过 |
-
-### 实际打包安装验证
-
-本日实际执行了 `npm pack --pack-destination <clean-temp-dir>`，随后在另一个干净临时目录执行 `npm install --prefix <clean-install-dir> <tarball>`，安装成功。随后从该安装目录读取包元数据并用 `DatabaseSync(':memory:')` 执行 `SELECT 1`，输出：
-
-```text
-personal-agent tarball install/sqlite smoke: ok
-```
-
-也实际探测了安装后的 TypeScript 运行时导入：Node.js 24 对 `node_modules` 内 `.ts` 文件抛出 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`，即使加 `--experimental-transform-types` 也相同。因此没有声称 tarball 已是可导入的 JavaScript 运行时；这一限制和冒烟的准确边界已写入 [docs/install.md](docs/install.md)。可运行开发方式仍是仓库内 `npm ci` 后 `npm run dev`。
-
-## 8. 本日文件与边界
-
-- `src/memory/run-store.ts`：完成结果结构校验。
-- `test/d023-idempotency.test.ts`：损坏 `result_json` RED/GREEN 与回归测试。
-- `test/run-command.test.ts`：ready 后触发 timeout 的确定性测试。
-- `test/d023-crash-idempotency.test.ts`：5 轮扩为 10 轮真实 SIGKILL。
-- `docs/install.md`：陌生开发者安装与本地 tarball 验证。
-- `README.md`：本教学记录。
-
-边界：未合并 `main`，未做 D025，未发布 npm 或 GitHub release，未制作视频，未声称任何外部用户反馈。SIGKILL 验证环境为 macOS / Node.js 24；Windows 的 POSIX signal 语义不在本次实测范围内。当前 `private` 源码开发包的公开运行时发布形态仍属后续发布工作。
+- 离线 Demo 证明 Loop、工具与发布包可运行，不证明外部模型质量。
+- 普通 CLI 仅适配 OpenAI 兼容协议，真实调用需要用户自配服务与密钥。
+- 第一周版本不包含 MCP，不提供进程恢复、托管运行等后续能力的发布级支持。
+- D025 不合并 main、不提前创建 tag 或 GitHub Release。主代理合并后需从 main 重新验收、pack，创建 `v0.1.0` tag，再用 `gh` 把 tarball 和 Release Note 发布。
