@@ -1,203 +1,151 @@
-# Personal Agent · D033 公开课：40 个 API 该做成几个工具
+# Personal Agent · D034 MCP 协议走读
 
-> **进度**：D033 / D100
-> **版本**：`0.1.0`
-> **课程日期**：2026-12-13（计划日期，不代表已实际授课）
-> **分支**：`D033`，从 D032 `8a23ca458ce3f9a71c5fb4a9d66ddcea8534b004` 创建
-> **任务**：准备完整公开课讲义与工具清单资料包，把虚构星桥商城的 40 个 API 精确归并为一组可治理的 Agent 工具
+> 进度：**D034 / D100 · v0.1.0**
+> 当日目标：走读 MCP 的传输、握手、能力协商、工具/资源/提示，交付中文协议笔记与可渲染调用时序图。
+> 本日只做 D034，**不实现 D035 Client**，不修改 main 索引。
 
-D033 的答案不是一个孤立数字，而是一套可审查的设计：**40 个虚构业务 API → 16 个 Agent 工具**。切分依据是任务内聚、读写差异、权限与确认、一致性边界、幂等与失败恢复，而不是 HTTP 端点数量。
+## 今日交付
 
-本日交付为**完整中文公开课讲义 + 工具清单资料包**。星桥商城、40 个 API、字段、ID 和示例结果均为教学虚构；16 个工具是设计规格，**没有在本仓库注册、实现或连接真实商城**。课程材料已经准备，**公开课尚未实际举办，没有视频回放、现场记录或学员反馈**。
+| 交付物 | 内容 |
+| --- | --- |
+| [MCP 中文协议笔记](./docs/d034-mcp-protocol.md) | 角色、JSON-RPC、生命周期、stdio/Streamable HTTP、能力、六个核心方法、错误、安全、D035 验收契约 |
+| [MCP 调用时序图](./docs/d034-mcp-sequence.md) | 两张内联 Mermaid：stdio 初始化到 `tools/call`；Streamable HTTP 的 Session、资源/提示、错误与 SSE 重连 |
 
-## 本日交付
+两份文档中的版本、请求 ID、`protocolVersion`、能力字段、工具名、资源 URI、content 和错误语义互相对照。图是依据规范绘制的教学示例，不是实际抓包。
 
-| 文件 | 内容 | 使用方式 |
-| --- | --- | --- |
-| [`docs/d033-public-course.md`](docs/d033-public-course.md) | 90 分钟完整中文讲义：逐段讲师稿、板书、互动、课堂推演、练习与完整答案、FAQ | 讲师按时间轴授课；所有演示均标明为虚构推演 |
-| [`docs/d033-tool-inventory.md`](docs/d033-tool-inventory.md) | A01–A40 唯一映射、16 个工具的输入/成功输出 Schema 与完整治理契约、反例、16 条粒度清单 | 学员课后设计与评审；可复制 Schema 作为适配器设计起点 |
-| [`README.md`](README.md) | 当日范围、核心结论、真实 Harness 基线、验证结果与诚实边界 | 快速了解 D033，不把它误读为业务集成发布 |
+## 版本范围（先读）
 
-本日不新增业务运行时代码、模型 Provider、API 适配器、MCP 功能或视频文件，不修改 main 索引，不合并 main。
+- **主读版本：MCP 2025-11-25**。它定义有状态会话、`initialize` 请求、`notifications/initialized`、初始能力协商和本文的 Session 规则。
+- **基础消息：JSON-RPC 2.0**。MCP 2025-11-25 Schema 的 `JSONRPCMessage` 联合不含 Batch，不能从 JSON-RPC 自身支持 Batch 推断 MCP 也支持。
+- **当前 latest 边界：MCP 2026-07-28**。本次访问官方站点时，该版已改成逐请求元数据模型，没有 `initialize` 协商握手。本文没有把两代报文混写，D035 也不宣称兼容这一版。
+- **历史传输：2024-11-05 HTTP+SSE** 只在笔记中作为旧双 endpoint 模型标注，不与 2025-11-25 Streamable HTTP 混用。
+- 官方资料实际访问日期：**2026-11-12**。
 
-## 1. 这门课解决什么问题
+权威入口：[2025-11-25 Specification](https://modelcontextprotocol.io/specification/2025-11-25)、[同版本 Schema](https://github.com/modelcontextprotocol/specification/blob/main/schema/2025-11-25/schema.ts)、[2026-07-28 Versioning and Compatibility](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)。
 
-把每个 API 都暴露给模型，会让简单任务陷入大量相似选择；把所有 API 塞进一个通用请求工具，又会让模型获得难以校验、授权和审计的任意操作入口。
+## 学习路线
 
-真正需要设计的不是“函数包装数量”，而是下面这条完整边界：
+### 1. 先建立角色与消息模型
+
+阅读[协议笔记第 2 节](./docs/d034-mcp-protocol.md#2-hostclientserver-与消息边界)，分清：
+
+- Host 是管理连接、权限、用户同意和 LLM 协调的应用。
+- Client 是 Host 内与一个 Server 连接的连接器；D035 才计划实现。
+- Server 暴露 tools/resources/prompts，也可能反向请求 roots/sampling/elicitation。
+- Request 有 `id`，Response 以同一个 `id` 返回 `result` 或 `error`，Notification 无 `id` 且无响应。
+
+### 2. 再走完整生命周期
+
+阅读[协议笔记第 3 节](./docs/d034-mcp-protocol.md#3-生命周期初始化运行关闭)和[stdio 时序图](./docs/d034-mcp-sequence.md#图-1--stdio初始化到-toolscall)：
 
 ```text
-模型看得懂的任务意图
-  → 可校验的输入与可判别的成功输出
-  → 可发现、可拒绝的白名单和租户边界
-  → 对敏感副作用逐次确认
-  → 对幂等、超时、重试和错误有明确语义
-  → 失败结果能回喂 Loop，并有连续失败保险丝
+initialize request
+  → initialize result（检查版本与 Server capabilities）
+  → notifications/initialized（无 id）
+  → tools/list / tools/call
+  → 关闭传输（没有 shutdown RPC）
 ```
 
-因此，本课将 **API 视为服务访问边界，将 Agent 工具视为任务与治理边界**。16 是这套虚构业务在当前约束下的一种合理答案，不是跨业务固定比例。
+注意 `capabilities: {}` 是 Client 不声明可选反向能力，不是 Server 能力查询结果。
 
-## 2. 40 → 16 的完整结论
+### 3. 对照两种标准传输
 
-| # | Agent 工具 | 覆盖 API | 性质 | 核心切分理由 |
-| --- | --- | ---: | --- | --- |
-| 1 | `get_customer_context` | A01–A04 | 租户只读 | 同一客户上下文，用 include 选取资料、地址、会员和偏好 |
-| 2 | `explore_catalog` | A05–A08 | 共享只读 | 商品发现的四种封闭模式，不是任意 HTTP 代理 |
-| 3 | `quote_checkout` | A09–A12 | 报价计算 | 四项试算共享 cart revision 和过期时间，不下单、不扣款 |
-| 4 | `get_cart` | A13 | 租户只读 | 高频、单参数、独立的购物车快照 |
-| 5 | `update_cart` | A14–A17 | 普通写 | 同一购物车的变更共享 revision；重试取最保守共同分母 |
-| 6 | `create_order` | A18 | 敏感写 | 从报价生成订单是独立业务承诺点 |
-| 7 | `query_orders` | A19–A21 | 租户只读 | 订单列表、详情和时间线的只读视角 |
-| 8 | `cancel_order` | A22 | 敏感写 | 取消具有独立状态冲突、权限和补偿边界 |
-| 9 | `manage_payment` | A23–A24 | 敏感写 | 授权与扣款共享支付状态机，逐逻辑调用确认 |
-| 10 | `get_payment_status` | A25–A26 | 租户只读 | 支付写超时后的对账与事实查询 |
-| 11 | `inspect_refund` | A27–A28 | 租户只读 | 退款事实查询与资金写入分离 |
-| 12 | `request_refund` | A29 | 敏感写 | 独立资金副作用、确认和写后查询 |
-| 13 | `query_shipments` | A30–A32 | 租户只读 | 运单详情、订单运单和轨迹共享履约事实 |
-| 14 | `change_delivery` | A33–A34 | 敏感写 | 改地址与改派共享履约 revision 和状态约束 |
-| 15 | `query_support_cases` | A35–A36 | 租户只读 | 工单列表与详情聚合，不获得写权限 |
-| 16 | `manage_support_cases` | A37–A40 | 敏感写 | 工单状态机内聚；统一确认是有意记录的保守代价 |
+阅读[协议笔记第 4 节](./docs/d034-mcp-protocol.md#4-stdio-与-streamable-http)和[HTTP 时序图](./docs/d034-mcp-sequence.md#图-2--streamable-httpsession资源提示错误与-sse-重连)，重点检查：
 
-**数量守恒：4 + 4 + 4 + 1 + 4 + 1 + 3 + 1 + 2 + 2 + 2 + 1 + 3 + 2 + 2 + 4 = 40。**
-资料包第 2 节将 A01–A40 每个 API 恰好映射一次；第 4 节为每个工具提供完整契约。
+- stdio 的换行分帧与 stdout/stderr 分离。
+- POST 的 `Accept: application/json, text/event-stream`。
+- JSON 与 SSE 两种 Response 通道、GET SSE 的可选性。
+- `Mcp-Session-Id`、`MCP-Protocol-Version`、404 后重新初始化。
+- `Last-Event-ID` 只是可选恢复机制，不是自动重连承诺。
 
-## 3. 每个工具必须回答的八个问题
+### 4. 能力先于方法调用
 
-资料包不是只有一张名称表。16 个工具逐一给出：
+阅读[能力协商表](./docs/d034-mcp-protocol.md#5-能力协商谁声明谁使用)：
 
-1. **输入 Schema**：根 object、封闭枚举、必要字段和额外字段策略；
-2. **成功输出 Schema**：成功时 `ToolResult.content` 中业务载荷的设计；
-3. **切分理由**：为什么合并或独立，以及由此产生的代价；
-4. **只读/副作用**：报价、创建订单、授权、扣款、退款请求等事实不能混称；
-5. **权限/确认**：白名单、可信租户、资源归属和 sensitive 逐次确认；
-6. **幂等/重试**：requestId 与 revision 的业务责任、maxRetries 共同分母；
-7. **超时**：每次尝试的教学建议起点，以及写超时后的事实查询；
-8. **错误语义**：哪些可修正、哪些不可重试、哪些需要稍后对账或人工处理。
+- Server 声明 `tools/resources/prompts/logging`，Client 声明 `roots/sampling/elicitation`。
+- `listChanged` 只表示列表变化通知能力；资源的 `subscribe` 是另一个子能力。
+- 2025-11-25 的 elicitation 要区分 `form` 与 `url`，空对象只声明 form mode。
+- 未声明的能力不能按“先调用看看”处理；D035 选择本地先拒绝，远端协议错误仍如实保留。
 
-特别提醒：requestId 写在输入里，**不等于自动获得幂等**。持久去重是虚构业务适配器需要实现和证明的责任；未实现时，相关写工具保持 `maxRetries:0`。
+### 5. 最后比较三类原语和错误通道
 
-## 4. 与 D027–D032 真实机制对齐
+阅读[核心方法](./docs/d034-mcp-protocol.md#6-工具资源提示核心请求与响应)：
 
-本课只把已有 Harness 机制作为设计约束，不声称虚构业务已经接入。
+| 方法 | 请求关键字段 | 响应关键字段 |
+| --- | --- | --- |
+| `tools/list` | 可选 `cursor` | `tools[]`、可选 `nextCursor` |
+| `tools/call` | `name`、`arguments` | `content[]`、可选 `structuredContent`、`isError` |
+| `resources/list` | 可选 `cursor` | `resources[]`、可选 `nextCursor` |
+| `resources/read` | `uri` | `contents[]`，每项为 `text` 或 `blob` |
+| `prompts/list` | 可选 `cursor` | `prompts[]`、可选 `nextCursor` |
+| `prompts/get` | `name`、可选字符串 `arguments` | `messages[]`，含 `role` 与 `content` |
 
-| 真实基础 | 本课如何使用 |
-| --- | --- |
-| D027：Tool 契约、Registry 同名唯一、版本与元数据、按轮发现 | 16 是 Registry 条目设计；每个条目必须能独立理解和治理 |
-| D028：执行前 JSON/递归 Schema 校验与参数路径错误 | 输入先用当前支持的子集校验，条件必填与业务不变量留给业务层 |
-| D029：白名单、租户隔离、可信 tenantId、敏感工具逐逻辑调用确认 | 读写与资金操作拆分；sensitive 是条目级，不冒充按 action 自动变化 |
-| D030：每尝试超时、默认 maxRetries=0、有条件下重试、有界限流、half-open 熔断 | 合并动作必须审查共同重试策略；写超时先查询事实，不盲目重试 |
-| D031：ADR-001 的调用管线与失败语义 | 记录设计 trade-off，不用“最佳实践”掩盖权限和韧性代价 |
-| D032：10 个真实工具、真实 Loop 正常串联 9 个工具 | 借鉴参数依赖与证据意识，但不把离线 Provider 说成真实模型规划 |
+必须分开：`result.isError=true` 是工具执行结果中的失败；外层 `error` 是 JSON-RPC 协议失败；HTTP 状态又是传输层结果。三者不能互相改写。
 
-真实执行顺序是：可见性检查 → JSON 解析 → 参数校验 → 敏感确认 → 韧性执行 → ToolResult 回喂。工具失败本身不立即中断 Loop，成功会清零连续失败计数，默认连续 3 次工具错误以 `tool_errors` 停止。
+## 与现有项目代码的边界
 
-### 4.1 Schema 的源码核对差异
+本仓库已有 `src/core/tool.ts`、`src/tools/schema.ts` 和 `src/tools/registry.ts`，但它们只定义本项目的 Tool/Registry 契约：
 
-资料包只使用 D032 基线 `src/tools/schema.ts` 实际执行的子集：
+- `categories`、`execute`、`Promise<string>` 不是 MCP 官方线格式。
+- 本地 `inputSchema` 相似不代表已经实现 MCP 官方 Tool Schema。
+- 本日没有新增 MCP 适配器、Client、Server、请求解析器或校验脚本。
+- D035 的接口和验收清单仅在[协议笔记第 9 节](./docs/d034-mcp-protocol.md#9-给-d035-的最小客户端契约尚未实现)中定义，明确标注“尚未实现”。
 
-- 类型：`object/string/number/integer/boolean/array/null`；
-- 关键字：`properties/required/additionalProperties:false/items/minLength/minimum/maximum/enum`。
+因此本日纯文档交付没有新增可执行行为，不制造无意义 RED；D035 一旦增加运行时代码，必须先 RED→GREEN。
 
-ADR-001 的文字列表写有 `maxLength/uniqueItems`，但当前源码未执行这两个关键字。资料包已移除对这些 JSON 约束的依赖，并在第 3.1 节明确差异：字符串最大长度、数组长度与唯一性由业务层检查。本日不借机修改 ADR 或生产代码，因为任务范围是课程与工具设计资料。
+## 安全阅读清单
 
-同样，`oneOf/$ref/pattern/format`、默认值、类型强转和条件必填不属于当前能力。`mode/action` 对应的条件字段必须由工具业务层二次校验。
+阅读[协议笔记安全边界](./docs/d034-mcp-protocol.md#7-安全边界mcp-不会自动替你完成)，至少记住：
 
-### 4.2 输出、租户与韧性边界
+1. 工具描述、annotations 和模型意图都不是用户授权。
+2. 入参、出参、Prompt 输入输出仍需实现方校验。
+3. 用户数据、资源内容和 roots 不能未经同意暴露；日志必须脱敏。
+4. MCP 不会自动提供传输认证、授权、权限审批或完整安全边界。
+5. HTTP 要验证 `Origin`、限制本地绑定并实施适当认证；Session ID 不是认证凭证。
+6. Token passthrough、confused deputy、session hijacking 等风险须看官方安全最佳实践，而不是只看方法 Schema。
 
-- 输出 Schema 是成功业务载荷的设计规格；当前 Registry **不校验输出**，生产适配器需要自行测试。
-- tenantId 不出现在模型输入 Schema 中；可信值由 Registry 策略写入 ToolContext，工具仍须验证资源归属。
-- 教学建议超时不等于项目默认值或实测 SLO；当前语义是**每次尝试超时**，没有独立总 deadline。
-- `retryable:true` 不等于允许自动重试；还需满足条目幂等策略。限流和熔断不在同一逻辑调用中立即自动重试。
-- 敏感确认是每次逻辑 `registry.execute` 一次，不是每次内部重试一次；敏感非幂等工具的安全基线仍是不重试。
+官方来源：[Security and Trust & Safety](https://modelcontextprotocol.io/specification/2025-11-25#security-and-trust--safety)、[Authorization](https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)、[Security Best Practices](https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices)。
 
-## 5. 课堂怎样使用这两份材料
+## 图源与渲染
 
-### 90 分钟授课路径
+- 图源为 `docs/d034-mcp-sequence.md` 内两段 `mermaid` 代码，无外链图片、无生成媒体。
+- 内容依据官方 2025-11-25 Lifecycle、Transports、Tools、Resources、Prompts；每个图后附具体锚点链接。
+- 支持 Mermaid 的 Markdown 预览器可直接渲染；也可用 Mermaid CLI 将提取出的图代码渲染为 SVG。
+- 图内 `s-123`、`evt-41`、`evt-42` 都是教学示例值，不是真实会话或网络记录。
 
-1. **0–5 分钟**：记录“40 个 API 该有几个工具”的初始直觉；
-2. **5–15 分钟**：建立 API、函数、Agent 工具的区别与真实 Harness 基线；
-3. **15–28 分钟**：小组对 A01–A22 做第一次归并，质疑权限与失败边界；
-4. **28–42 分钟**：公布 16 工具地图，解释读上下文、一致性快照和状态机内聚；
-5. **42–56 分钟**：推演下单确认与支付超时，练习“回喂→查询→再决定”；
-6. **56–66 分钟**：辨别 Registry Schema、业务校验和输出适配器测试；
-7. **66–75 分钟**：审查 40=40、万能工具、所有失败重试等七个反例；
-8. **75–84 分钟**：完成一张可评审工具卡，讨论拆并代价；
-9. **84–90 分钟**：三道退出题，使用 16 条清单复盘。
+## 验证方法
 
-讲义包含逐段讲师稿、板书、互动预期、练习完整答案和 12 条 FAQ，可直接备课。建议先发讲义、后发资料包答案，或在第一次小组练习后再打开资料包第 1 节。
-
-### 课堂演示不是运行证据
-
-讲义中的下单、支付超时和查询分支均标注为**课堂推演**：ID、金额、报文和结果都是虚构样本，不是终端实录，不是真实模型调用，也不是生产事故复盘。
-
-D032 的真实多工具证据仍属于 D032；D033 没有为虚构商城制作假的 transcript、截图或回放。
-
-## 6. 反例与可复用清单
-
-资料包详细分析七类反例：
-
-- 40 API 机械生成 40 个工具；
-- 一个接受任意 method/path/body 的 `commerce_api`；
-- 一个混合所有读写的 `manage_commerce`；
-- 把未支持的 Schema 关键字当成安全约束；
-- 所有错误都重试；
-- 信任模型传入的 tenantId；
-- 返回无结构字符串或过大的原始报文。
-
-迁移到其他业务时，按 16 条清单审查：一句话意图、业务内聚、调用频率、读写分离、权限一致、副作用可解释、输入可判别、输出有界、幂等可证明、重试共同分母、失败可恢复、每尝试超时预算、独立可测、模型可发现、演化信号和映射守恒。
-
-## 7. 验证方式
-
-### 环境
-
-- Node.js 24；原生 TypeScript ESM；零新增运行时依赖。
-- 干净检出尚未安装开发依赖时先运行 `npm ci`。
-- 阅读和授课不需要 API Key、网络或真实商城。
-
-### 文档结构审计
-
-对资料包执行本地只读脚本审计，结果：
-
-- 33 个 JSON 代码块全部可解析，其中 32 个是工具输入/输出 Schema，另 1 个是万能工具反例；
-- 32 个 Schema 未使用当前实现不支持的关键字；
-- A01–A40 按顺序各出现一次，唯一映射到 16 个工具；
-- 每个工具的 API 数量与总表一致，合计恰好 40；
-- 16 个工具均有输入、成功输出、切分理由、副作用、权限/确认、幂等/重试、建议超时与错误语义。
-
-本日为纯文档课程交付，没有新增或修改生产行为，因此不制造无意义的 TDD RED；采用既有全量回归、文档结构审计和最终 diff 审查验证。
-
-### 全量检查与覆盖率
+在仓库根目录执行：
 
 ```bash
 npm run check
 npm run test:coverage
+git diff --check
 ```
 
-本分支提交前的实际终端结果如下：
+另做两类文档验证：
 
-| 检查 | 实际结果 |
-| --- | --- |
-| `npm run check` | 通过：ESLint、TypeScript `--noEmit`、37 个测试文件 / 340 个测试全部通过 |
-| `npm run test:coverage` | 通过：37 个测试文件 / 340 个测试全部通过，覆盖率阈值通过 |
-| Statements / Lines | 93.61% / 95.22% |
-| Branches / Functions | 89.41% / 99.59% |
+1. **Mermaid**：提取两段 `mermaid` 代码，用 Mermaid 解析/渲染工具检查语法；工具验证只证明语法可处理，不等同于人工确认所有浏览器布局。
+2. **链接**：检查相对链接目标存在，并对官方 HTTPS 链接执行实际 HTTP 请求，记录状态与重定向；网络可达性不等于内容永远不变，所以版本和访问日期必须保留。
 
-覆盖率阈值保持 Statements/Lines/Functions ≥ 80%、Branches ≥ 75%。文档审计不替代代码测试，既有测试通过也不证明 16 个虚构业务工具已经实现。
+### 本次实际验证结果（2026-11-12）
 
-## 8. 完成标准与诚实边界
+- 运行环境：Node.js `v24.19.0`，npm `11.17.0`。
+- `npm run check`：ESLint、TypeScript `tsc --noEmit` 与 Vitest 均通过；共 **37 个测试文件、340 个测试通过**。
+- `npm run test:coverage`：共 **37 个测试文件、340 个测试通过**；总覆盖率为 **Statements 93.61% / Branches 89.41% / Functions 99.59% / Lines 95.22%**。本日未改运行时代码，这些结果用于确认既有项目未被破坏，不代表 MCP Client 已有测试。
+- **Mermaid**：使用临时调用的 **Mermaid CLI 11.12.0** 和本机 Chrome，将两段图源实际渲染为 SVG，**2/2 成功**，且两个 SVG 均通过 XML 解析。临时文件位于 `/tmp/personal-agent-d034-mermaid/`，未向仓库添加依赖、生成媒体或校验脚本。初次检查发现 Prompt 示例中的分号会触发 Mermaid parse error，修正图源后已重跑通过。
+- **相对链接**：检查三份文档中的 **15 个相对链接出现位置**，目标文件均存在，带锚点的链接均匹配目标标题。
+- **HTTPS 链接**：对 **36 个唯一 URL** 实际发起请求，均返回 **HTTP 200**。两个 GitHub Schema URL 重定向到 `modelcontextprotocol/modelcontextprotocol`，Security Best Practices URL 重定向到官方 `docs/2025-11-25/...` 路径；外部页面的片段锚点不由 HTTP 请求验证。
+- 以上网络结果只代表本日可访问状态；Mermaid 验证证明图源可被该版本工具解析并生成 SVG，不等同于所有 Markdown 预览器或浏览器中的像素级版式保证。
 
-- [x] 完整中文公开课讲义，包含 90 分钟流程、讲师稿、板书、互动、FAQ、练习及完整答案。
-- [x] 40 个 API 精确归并为 16 个工具，A01–A40 无遗漏、无重复。
-- [x] 每工具都有输入/成功输出 Schema、切分理由、只读/副作用、权限/确认、幂等/重试、超时/错误。
-- [x] 包含 40=40、万能工具等反例与 16 条可复用粒度清单。
-- [x] 对齐 D027–D032 真实机制，明确当前 Schema 与 ADR 文字差异。
-- [x] 明确课程材料已准备，但未实际授课、无回放、无现场反馈。
-- [x] 全量检查、覆盖率与最终 diff 审查在提交前完成并记录。
+## 限制与下一步
 
-### 不承诺
+- 本日只完成 D034 文档，不提前实现 D035。
+- 没有连接真实外部 MCP Server，没有 OAuth、SSE 抓包或互操作性结论。
+- 没有实现 2026-07-28 modern 模型、HTTP Client、Batch、Tasks、roots/sampling/elicitation。
+- Mermaid 图是规范示例；真实 Server 的可选能力、分页、错误和重连行为必须按协商与实际响应处理。
+- D035 范围建议固定为 **2025-11-25 / stdio / tools 最小客户端**，严格按验收清单测试，不将本地 fixture 说成外部服务。
 
-- 不承诺已举办课程、已发布视频或获得学员认可；
-- 不承诺星桥商城、40 个 HTTP API 或 16 个业务工具已经实现；
-- 不承诺真实模型规划质量、生产性能、外部 API 兼容或业务安全审计；
-- 不将教学建议的 retry/timeout 数值冒充默认配置或实测结论；
-- 不在 D033 提前实现 D034/MCP，不推进新运行时版本，不合并 main。
+---
+
+**D034 / D100 · v0.1.0**
