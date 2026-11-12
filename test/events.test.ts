@@ -194,6 +194,17 @@ describe('AgentEvent 顺序', () => {
 });
 
 describe('createLoggerEventSink', () => {
+  it('assistant_delta 不产生逐片日志', () => {
+    const lines: string[] = [];
+    const logger = createLogger({ sink: (line) => lines.push(line) });
+    const sink = createLoggerEventSink(logger);
+
+    sink.emit({ type: 'assistant_delta', turn: 1, delta: '只' });
+    sink.emit({ type: 'assistant_delta', turn: 1, delta: '写终端' });
+
+    expect(lines).toEqual([]);
+  });
+
   it('工具开始与正常完成各输出一行摘要日志', () => {
     const lines: string[] = [];
     const logger = createLogger({ sink: (line) => lines.push(line) });

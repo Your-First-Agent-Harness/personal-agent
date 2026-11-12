@@ -50,6 +50,63 @@ describe('runRepl', () => {
     expect(text()).toBe('固定答案\n');
   });
 
+  it('流式答案只输出一次，结束后仅补换行', async () => {
+    const { output, text } = captureOutput();
+    const { createTerminalTurn } = await import('../src/cli/repl.ts');
+
+    await runRepl({
+      input: Readable.from(['问题\n/exit\n']),
+      output,
+      runTurn() {
+        const terminal = createTerminalTurn((chunk) => {
+          output.write(chunk);
+        });
+        terminal.eventSink.emit({ type: 'assistant_delta', turn: 1, delta: '你' });
+        terminal.eventSink.emit({ type: 'assistant_delta', turn: 1, delta: '好' });
+        return Promise.resolve(terminal.complete('你好'));
+      },
+    });
+
+    expect(text()).toBe('你好\n');
+  });
+
+  it('没有增量时仍输出一次完整答案', async () => {
+    const { output, text } = captureOutput();
+    const { createTerminalTurn } = await import('../src/cli/repl.ts');
+
+    await runRepl({
+      input: Readable.from(['问题\n/exit\n']),
+      output,
+      runTurn() {
+        const terminal = createTerminalTurn((chunk) => {
+          output.write(chunk);
+        });
+        return Promise.resolve(terminal.complete('完整回答'));
+      },
+    });
+
+    expect(text()).toBe('完整回答\n');
+  });
+
+  it('已有增量时仍输出取消或未收敛状态', async () => {
+    const { output, text } = captureOutput();
+    const { createTerminalTurn } = await import('../src/cli/repl.ts');
+
+    await runRepl({
+      input: Readable.from(['问题\n/exit\n']),
+      output,
+      runTurn() {
+        const terminal = createTerminalTurn((chunk) => {
+          output.write(chunk);
+        });
+        terminal.eventSink.emit({ type: 'assistant_delta', turn: 1, delta: '部分回答' });
+        return Promise.resolve(terminal.complete('任务已取消。', { status: true }));
+      },
+    });
+
+    expect(text()).toBe('部分回答\n任务已取消。\n');
+  });
+
   it('首行 /exit 时不调用 runTurn', async () => {
     const prompts: string[] = [];
     const { output, text } = captureOutput();

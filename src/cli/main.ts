@@ -11,7 +11,8 @@ import { createLogger } from '../observability/logger.ts';
 import { runAgentLoop } from '../runtime/loop.ts';
 import { createBuiltinTools } from '../tools/builtin.ts';
 import { ToolRegistry } from '../tools/registry.ts';
-import { runRepl } from './repl.ts';
+import { createTerminalTurn, runRepl, writeTurnOutput } from './repl.ts';
+import type { TurnOutput } from './repl.ts';
 
 const config = loadConfig();
 const logger = createLogger({ level: config.log.level }).child({ traceId: randomUUID() });
@@ -56,10 +57,12 @@ if (config.model.provider !== 'openai-compatible') {
   ]);
   let startedAt = Date.now();
 
-  async function runTurn(input: string): Promise<string> {
+  async function runTurn(input: string): Promise<TurnOutput> {
     session.append([{ role: 'user', content: input }]);
     const before = session.snapshot();
     startedAt = Date.now();
+    const terminal = createTerminalTurn((chunk) => process.stdout.write(chunk));
+    const loggerSink = createLoggerEventSink(logger);
     const result = await runAgentLoop({
       provider,
       registry,
@@ -69,8 +72,14 @@ if (config.model.provider !== 'openai-compatible') {
       maxContextChars: config.agent.maxContextChars,
       maxConsecutiveToolErrors: config.agent.maxConsecutiveToolErrors,
       workspaceRoot: config.workspace.root,
-      eventSink: createLoggerEventSink(logger),
+      eventSink: {
+        emit(event) {
+          loggerSink.emit(event);
+          terminal.eventSink.emit(event);
+        },
+      },
       signal: controller.signal,
+      streaming: true,
     });
 
     session.append(result.messages.slice(before.length));
@@ -81,21 +90,24 @@ if (config.model.provider !== 'openai-compatible') {
       usage: result.usage,
     });
     if (result.stopReason === 'cancelled') {
-      return '任务已取消。';
+      return terminal.complete('任务已取消。', { status: true });
     }
     if (result.stopReason === 'tool_errors') {
-      return '连续工具错误达到上限，任务未收敛，请检查最后的工具错误。';
+      return terminal.complete('连续工具错误达到上限，任务未收敛，请检查最后的工具错误。', { status: true });
     }
-    return result.stopReason === 'max_turns'
-      ? `已达到最大轮次 ${config.agent.maxTurns}，任务未收敛。最后一条消息：\n${JSON.stringify(result.messages.at(-1))}`
-      : result.text;
+    return terminal.complete(
+      result.stopReason === 'max_turns'
+        ? `已达到最大轮次 ${config.agent.maxTurns}，任务未收敛。最后一条消息：\n${JSON.stringify(result.messages.at(-1))}`
+        : result.text,
+      { status: result.stopReason === 'max_turns' },
+    );
   }
 
   try {
     if (prompt === '') {
       await runRepl({ input: process.stdin, output: process.stdout, runTurn });
     } else {
-      process.stdout.write(`${await runTurn(prompt)}\n`);
+      writeTurnOutput((chunk) => process.stdout.write(chunk), await runTurn(prompt));
     }
   } catch (error) {
     logger.error('运行失败', {
