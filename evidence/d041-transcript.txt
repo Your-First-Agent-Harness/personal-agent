@@ -1,0 +1,19 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 demo:d041
+> node scripts/d041-knowledge.ts
+
+D041 确定性离线 Demo：不请求网络、不需要 API Key；临时目录是明确构造的教学知识库。
+快照在 createKnowledgeTools 工厂调用时建立；搜索是子串匹配，不是 embedding、RAG 或语义搜索。
+注册工具：knowledge_search、knowledge_read
+[01] knowledge_search
+  参数：{"query":"发布窗口"}
+  结果摘要：{"query":"发布窗口","matchType":"case-insensitive-substring","ranking":"score:desc,path:asc,line:asc","total":1,"results":[{"path":"operations/release.md","line":3,"score":1,"snippet":"发布窗口为每周二 14:00，发布前必须完成全量测试。"}]}
+[02] knowledge_read
+  参数：{"path":"operations/release.md","startLine":3,"endLine":3}
+  结果摘要：{"path":"operations/release.md","startLine":3,"endLine":3,"totalLines":4,"lines":[{"line":3,"text":"发布窗口为每周二 14:00，发布前必须完成全量测试。"}]}
+来源：operations/release.md:3 发布窗口为每周二 14:00，发布前必须完成全量测试。
+最终回答：发布窗口为每周二 14:00，发布前必须完成全量测试。（来源：operations/release.md:3）
+stopReason=completed turns=3
+workspaceRemoved=true
+D041 Demo PASS：search → 真实 tool 消息取路径/行号 → read → 带行号来源回答；临时知识库已清理。

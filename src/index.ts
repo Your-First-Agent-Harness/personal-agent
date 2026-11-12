@@ -7,9 +7,12 @@ export type { G1DemoReport } from './demo/g1.ts';
 export { runD032Demo } from './demo/d032.ts';
 export type { D032DemoOptions, D032DemoReport, D032DemoStep } from './demo/d032.ts';
 export { createD032Tools } from './demo/d032-tools.ts';
+export { runD041Demo } from './demo/d041.ts';
+export type { D041DemoReport, D041DemoStep, D041Source } from './demo/d041.ts';
 export { runAgentLoop } from './runtime/loop.ts';
 export type { AgentLoopOptions, AgentLoopResult } from './runtime/loop.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
+export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
   ToolCircuitBreakerOptions,
   ToolRateLimitOptions,
