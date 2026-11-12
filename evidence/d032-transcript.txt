@@ -1,0 +1,49 @@
+
+> personal-agent@0.1.0 demo:d032
+> node scripts/d032-multi-tool.ts
+
+D032 确定性离线 Demo：不请求网络、不需要 API Key；ModelProvider 只编排调用，工具结果全部来自真实 AgentLoop + ToolRegistry。
+注册工具（10）：read_file、list_dir、write_file、edit_file、run_command、parse_tap_output、evaluate_test_gate、render_release_report、sha256_text、verify_file_sha256
+[01] list_dir
+  参数摘要：{"path":"."}
+  结果摘要：math.js package.json quality-gate.json release.test.js
+[02] read_file
+  参数摘要：{"path":"quality-gate.json"}
+  结果摘要：{ "title": "D032 多工具协作验收", "minPass": 2, "maxFail": 0 }
+[03] run_command
+  参数摘要：{"command":"\"/Users/stark/.nvm/versions/node/v24.19.0/bin/node\" --test --test-reporter=tap release.test.js","timeoutMs":10000}
+  结果摘要：{"command":"\"/Users/stark/.nvm/versions/node/v24.19.0/bin/node\" --test --test-reporter=tap release.test.js","exitCode":0,"timedOut":false,"cancelled":false,"stdout":"TAP version 13\n# Subtest: add returns the sum\nok 1 - add returns th...
+[04] parse_tap_output
+  参数摘要：{"commandResultJson":"{\"command\":\"\\\"/Users/stark/.nvm/versions/node/v24.19.0/bin/node\\\" --test --test-reporter=tap release.test.js\",\"exitCode\":0,\"timedOut\":false,\"cancelled\":false,\"stdout\":\"TAP version 13\\n# Subtest: ad...
+  结果摘要：{"tests":2,"pass":2,"fail":0,"skipped":0,"todo":0,"exitCode":0}
+[05] evaluate_test_gate
+  参数摘要：{"configJson":"{\n \"title\": \"D032 多工具协作验收\",\n \"minPass\": 2,\n \"maxFail\": 0\n}\n","summaryJson":"{\"tests\":2,\"pass\":2,\"fail\":0,\"skipped\":0,\"todo\":0,\"exitCode\":0}"}
+  结果摘要：{"title":"D032 多工具协作验收","minPass":2,"maxFail":0,"tests":2,"pass":2,"fail":0,"exitCode":0,"passed":true,"reasons":["通过测试数、失败测试数与退出码均满足发布规则"]}
+[06] render_release_report
+  参数摘要：{"gateResultJson":"{\"title\":\"D032 多工具协作验收\",\"minPass\":2,\"maxFail\":0,\"tests\":2,\"pass\":2,\"fail\":0,\"exitCode\":0,\"passed\":true,\"reasons\":[\"通过测试数、失败测试数与退出码均满足发布规则\"]}"}
+  结果摘要：# D032 多工具协作验收 - 门禁结果：**通过** - 测试总数：2 - 通过：2 - 失败：0 - 退出码：0 - 规则：至少通过 2 项，最多失败 0 项 ## 判定依据 - 测试命令真实执行且退出码为 0 - TAP 汇总满足发布门禁
+[07] sha256_text
+  参数摘要：{"text":"# D032 多工具协作验收\n\n- 门禁结果：**通过**\n- 测试总数：2\n- 通过：2\n- 失败：0\n- 退出码：0\n- 规则：至少通过 2 项，最多失败 0 项\n\n## 判定依据\n\n- 测试命令真实执行且退出码为 0\n- TAP 汇总满足发布门禁\n"}
+  结果摘要：{"algorithm":"sha256","sha256":"dd547123cb1eb56cb69340c20aa5d4ac8fb661a884f2b0a7076667a69249603d"}
+[08] write_file
+  参数摘要：{"path":"release-report.md","content":"# D032 多工具协作验收\n\n- 门禁结果：**通过**\n- 测试总数：2\n- 通过：2\n- 失败：0\n- 退出码：0\n- 规则：至少通过 2 项，最多失败 0 项\n\n## 判定依据\n\n- 测试命令真实执行且退出码为 0\n- TAP 汇总满足发布门禁\n"}
+  结果摘要：已写入 release-report.md（127 字符）
+[09] verify_file_sha256
+  参数摘要：{"path":"release-report.md","expectedSha256":"dd547123cb1eb56cb69340c20aa5d4ac8fb661a884f2b0a7076667a69249603d"}
+  结果摘要：{"path":"release-report.md","algorithm":"sha256","expectedSha256":"dd547123cb1eb56cb69340c20aa5d4ac8fb661a884f2b0a7076667a69249603d","actualSha256":"dd547123cb1eb56cb69340c20aa5d4ac8fb661a884f2b0a7076667a69249603d","matched":true}
+最终回答：发布门禁通过：2/2 项测试通过，release-report.md 已写入并校验 SHA-256（dd547123cb1eb56cb69340c20aa5d4ac8fb661a884f2b0a7076667a69249603d）。
+发布报告内容：
+# D032 多工具协作验收
+
+- 门禁结果：**通过**
+- 测试总数：2
+- 通过：2
+- 失败：0
+- 退出码：0
+- 规则：至少通过 2 项，最多失败 0 项
+
+## 判定依据
+
+- 测试命令真实执行且退出码为 0
+- TAP 汇总满足发布门禁
+D032 Demo PASS：9 个不同工具完成真实串联，报告已写入并通过 SHA-256 校验；临时工作区已清理。

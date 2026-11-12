@@ -1,262 +1,226 @@
-# Personal Agent · D031 工具设计复盘与 ADR-001 定稿
+# Personal Agent · D032 十个工具跑通一个真实任务
 
-> **课程日期**：2026-12-11
-> **分支**：D031，从 D030 `6a59ec10cd2a23b4d08c42359f81184971e11e0f` 创建
-> **任务**：复盘 D027–D030，定稿 ADR-001《工具设计取舍》
-> **本日性质**：文档与复盘，不新增运行时行为，不制造失败测试
+> **进度**：D032 / D100
+> **版本**：`0.1.0`
+> **课程日期**：2026-12-12
+> **分支**：`D032`，从 D031 `99181d289e9f762f2da2f1d9f8c1a51e38d829f7` 创建
+> **任务**：注册 10 个用途清晰的工具，让一个任务通过真实 AgentLoop + ToolRegistry 串联至少 4 个不同工具
 
-D027–D030 已经把工具从“函数列表”变成一条有注册、有校验、有权限、有韧性的调用管线。D031 不再向前堆功能，而是回答：**为什么这样组合，付出了什么成本，哪些结论有代码和测试依据，哪些仍然不能承诺。**
+D032 不再增加 Registry 机制，而是把前五天做出的工具契约、Schema、权限、错误回喂和 Loop 组合成一条可以逐帧核对的任务链：**读取发布规则，真实运行测试，只有门禁通过才生成报告，写入后再核对文件摘要。**
+
+本日最终注册恰好 10 个工具，正常任务实际串联 9 个不同工具。所有文件读写、命令执行、TAP 解析、门禁判断、报告渲染和 SHA-256 校验都通过真实工具完成；脚本化 ModelProvider 只决定下一步调用，并从上一条 `role="tool"` 消息取出真实结果构造下一步参数。
 
 ## 本日交付
 
 | 文件 | 内容 |
 | --- | --- |
-| [`docs/adr/0001-failure-semantics.md`](docs/adr/0001-failure-semantics.md) | ADR-001 定稿；保留 D017 失败语义初稿，补齐 D027–D030 的决策、备选方案、trade-off、后果与检查项 |
-| [`docs/weekly/2026-w50.md`](docs/weekly/2026-w50.md) | D027–D030 真实复盘；逐日实现、96 个定向测试、可靠证据和遗留边界 |
-| [`README.md`](README.md) | 本日教学说明、ADR 阅读路径和可运行验证命令 |
+| [`src/demo/d032-tools.ts`](src/demo/d032-tools.ts) | 复用 5 个内置工具，新增 5 个内聚工具，组成恰好 10 个工具的 Demo Registry |
+| [`src/demo/d032.ts`](src/demo/d032.ts) | 离线 Provider、真实 AgentLoop 编排、逐步证据、正常与失败断言、临时目录清理 |
+| [`scripts/d032-multi-tool.ts`](scripts/d032-multi-tool.ts) | `demo:d032` 的可执行入口 |
+| [`test/d032-multi-tool-demo.test.ts`](test/d032-multi-tool-demo.test.ts) | 注册数量、真实顺序、参数依赖、最终回答、失败门禁、Schema 和摘要异常测试 |
+| [`evidence/d032-transcript.txt`](evidence/d032-transcript.txt) | 实际执行 `npm run demo:d032` 后重定向保存的终端输出，不是手写脚本 |
+| [`README.md`](README.md) | 本日动机、设计取舍、工具清单、运行方式、证据和边界 |
 
-文件路径继续沿用 `0001-failure-semantics.md`，是为了保留 D017 的演进痕迹和既有引用；文档标题已扩展为《工具设计取舍》，没有另建互相竞争的 ADR-001。
+## 1. 为什么需要多工具 Demo
 
-## 1. 本日目标
+单独测试一个工具，只能证明这个工具的局部契约正确。真实任务还需要回答：
 
-读完本日内容，你应能：
+1. 模型看到的工具清单是否就是 Registry 当前发现的清单？
+2. 第二步拿到的是否真是第一步的输出，而不是演示程序偷偷准备的变量？
+3. 工具失败是否会回喂 Loop，后续步骤能否依据失败证据改变决策？
+4. 写文件之前的摘要，能否用于写文件之后的完整性校验？
+5. 最终回答能否由实际步骤和结果支撑？
 
-1. 画出一次 ToolCall 从模型发现到失败回喂的完整路径。
-2. 区分**工具版本元数据**与版本兼容协商，区分**逻辑调用**与内部尝试。
-3. 解释为什么参数校验先于敏感确认，权限检查又先于 JSON/Schema。
-4. 解释每尝试超时、幂等重试、有界队列和 half-open 熔断分别限制什么。
-5. 用源码、提交和测试复查 ADR，而不是把 ADR 当作不可验证的宣言。
-6. 说出当前实现的限制，不把进程内策略误称为生产级 IAM、分布式治理或安全沙箱。
+因此，本日不以“注册了 10 个”作为唯一完成标准，而检查一条完整消息历史：**assistant 发起 ToolCall → Registry 校验并执行 → tool 消息回喂 → 下一轮读取该消息 → 最终回答。**
 
-## 2. 一张图理解工具设计
+## 2. 恰好 10 个工具
 
-```text
-注册 / 替换
-  先验证 Tool + Schema + resilience，再修改 Map
-  非法替换不破坏旧工具
-       │
-       ▼
-每个 Agent turn 重新 list()
-  模型只看到当前可见的名称、描述、参数 Schema
-  单次请求保留 Schema 快照，下一轮可发现替换/注销
-       │
-       ▼
-Registry.execute(ToolCall)
-  1. 可见性：白名单 + 共享/当前租户
-  2. JSON 解析
-  3. 递归 Schema 校验
-  4. sensitive 工具取得本次确认
-  5. 熔断预检 → 有界并发/排队 → 取得许可后再查熔断
-  6. 每次尝试独立 timeout / AbortController
-  7. 仅符合条件的故障进行幂等、有界重试
-       │
-       ▼
-统一 ToolResult
-  content + isError + error.code / retryable / hint
-       │
-       ▼
-Agent Loop
-  把 content 作为 role="tool" 消息回喂
-  成功清零连续失败；连续失败达到上限则终止
-```
+`createBuiltinTools()` 仍只返回原来的 5 个通用工具。`createD032Tools()` 在其上组合 5 个 Demo 工具，不改变其他任务的默认注册行为。
 
-这里最重要的取舍是：**执行前尽早拒绝，执行后统一失败语义；安全策略决定是否允许，韧性策略决定允许后的故障如何被限制。**
-
-## 3. 工具设计取舍讲解
-
-### 3.1 契约放在一起，治理放在 Registry 条目里
-
-`Tool` 同时包含 `name`、`description`、`parameters` 和 `execute`。模型看到的参数说明不会与执行函数分成两套注册流程。
-
-Registry 额外保存：
-
-- `version`：非空字符串；未声明时为 `unversioned`；
-- `metadata`：给宿主发现的附加信息；
-- 白名单/租户以外的条目归属与 sensitive 标记；
-- 当前条目的 resilience 执行器。
-
-选择同名单活动条目，而不是 `name@version` 多版本共存，是为了让发现、执行和策略都简单。代价也很明确：**版本只做诊断，不强制 SemVer、不比较兼容、不支持按版本调用。**
-
-每轮重新发现兼顾撤销和修复，单次请求不追加点则避免模型请求内的工具数组突然变化。替换会建立新的韧性状态，已开始调用不会被强行切换。
-
-### 3.2 Schema 采用可维护子集，不假装完整标准
-
-当前递归校验支持：
-
-- object、string、number、integer、boolean、array、null；
-- properties、required、items、`additionalProperties: false`；
-- minLength/maxLength、minimum/maximum、enum、uniqueItems。
-
-它的价值是：
-
-1. 注册时拒绝坏 Schema，非法替换不破坏旧工具；
-2. 执行前拒绝坏参数，工具副作用尚未发生；
-3. 用 `$.members[1].name` 这样的路径帮助模型修复；
-4. 不自动强转、trim、填默认值或删除字段，避免把错误输入变成另一种操作。
-
-备选方案是信任模型、工具各自手写，或引入完整 JSON Schema 校验器。当前选择零新增依赖和统一错误格式，代价是维护一个明确的子集：`$ref`、oneOf/allOf、pattern、format 等未实现，也不保证模型提供商接受所有 Schema。**未实现的关键字不能当作安全约束。**
-
-### 3.3 白名单、租户和确认解决三个不同问题
-
-| 机制 | 回答的问题 | 当前语义 |
-| --- | --- | --- |
-| 白名单 | 这个调用方能用什么？ | 未配置不额外限制；空数组全禁；隐藏与执行同时过滤 |
-| 租户 | 这个条目属于谁？ | 共享或当前 Registry 租户可见；tenantId 由可信策略写入 |
-| sensitive 确认 | 这一次具体副作用是否被批准？ | 每次逻辑 execute 都重新确认，批准不永久保存 |
-
-顺序不能随意交换：
-
-- 先查可见性，隐藏工具即使收到坏 JSON 也只返回 `TOOL_NOT_ALLOWED`，不泄露 Schema；
-- 再解析和校验，避免让人审批畸形参数；
-- 最后确认，回调拿到 callId、工具名、已校验原始参数和可信租户。
-
-“逐次”指每次**逻辑调用**，不是每次内部重试。敏感非幂等工具应保持默认不重试；若显式开启，同一批准覆盖该次调用的所有尝试。
-
-### 3.4 四种韧性机制各有边界
-
-| 机制 | 限制的对象 | 当前默认值/规则 | 不能误读为 |
+| # | 工具 | 清晰用途 | 本任务是否使用 |
 | --- | --- | --- | --- |
-| 每次尝试超时 | 单次 execute attempt | 未配置则不增加 Registry 超时；外部 signal 优先 | 总 deadline 或无条件强杀进程 |
-| 幂等重试 | 故障后的重复副作用 | maxRetries=0；幂等或显式承担非幂等风险才开启 | 所有错误都应立即重试 |
-| 有界排队限流 | 并发与等待资源 | maxQueue=0；可配置队列长度和 maxWaitMs | 无限缓冲或跨租户公平调度 |
-| half-open 熔断 | 连续故障扩散 | 达阈值打开；冷却后单探针；成功关、失败重开 | 永久禁用或全量并发探测 |
+| 1 | `read_file` | 读取工作区内文本；本任务读取 `quality-gate.json` | 是 |
+| 2 | `list_dir` | 列出工作区内容，确认测试、源码和门禁配置的输入边界 | 是 |
+| 3 | `write_file` | 把已经渲染的报告真实写入临时工作区 | 是 |
+| 4 | `edit_file` | 对已有文本做精确替换；本任务没有需要修复的源码，不为了凑数调用 | 否 |
+| 5 | `run_command` | 在工作区执行 Node 原生测试并返回退出码、stdout、stderr | 是 |
+| 6 | `parse_tap_output` | 从上一步命令 JSON 的 stdout 提取 TAP tests/pass/fail 等汇总 | 是 |
+| 7 | `evaluate_test_gate` | 根据 minPass、maxFail 和退出码给出通过/拒绝及原因 | 是 |
+| 8 | `render_release_report` | 只把已通过的门禁结果渲染为确定性 Markdown | 是 |
+| 9 | `sha256_text` | 在写入前计算完整报告文本的 SHA-256 | 是 |
+| 10 | `verify_file_sha256` | 写入后重新读取文件，比较实际与预期 SHA-256 | 是 |
 
-还有三个容易忽略的组合规则：
+### 为什么是这 5 个新工具
 
-1. 每次重试都重新计时 timeout，指数退避可被外部取消打断。
-2. 逻辑调用在全部尝试与退避期间持有同一并发许可；每个逻辑调用只给熔断计一次最终失败。
-3. 限流和熔断拒绝会回喂，但当前执行器不会立即自动重试它们，避免放大压力。
+它们分别承担**解析、判断、渲染、计算、核验**，不是把同一个函数换五个名字：
 
-通用 AbortSignal 是协作式协议：Harness 不再接受超时后的迟到结果，却不能保证无视 signal 的 Promise、子进程或远端工作已经停止。
+- 解析器不理解发布规则，只提取测试事实；
+- 门禁不运行命令，只消费配置和结构化测试摘要；
+- 渲染器不重新判断测试，且拒绝渲染未通过的门禁；
+- 文本摘要不知道文件路径，文件核验不依赖渲染器内部状态；
+- 最后的文件校验能发现“写入内容不是计算摘要时内容”的错误。
 
-### 3.5 失败回喂不是永不终止
+这是一种有意的粒度取舍：足够小以便独立测试和替换，又不把每个字符串操作都暴露给模型。
 
-工具失败作为 `ToolResult` 返回，Loop 将其 `content` 回喂给模型。模型可以修正 JSON/参数、换路径、换工具或解释权限拒绝；不会因为一个文件错误就丢掉整个 run。
-
-但终止边界仍在：
-
-- 连续工具错误达到 `maxConsecutiveToolErrors`（默认 3）→ `tool_errors`；
-- 达到 maxTurns → `max_turns`；
-- 模型取消或外部取消 → `cancelled`；
-- 模型提供商异常 → 向上抛出，不伪装成工具错误。
-
-未知异常会脱敏成 `INTERNAL_ERROR`，但工具主动返回的 content/message 仍由工具作者负责，不能写入秘密。工具输出也是模型上下文的一部分，当前没有通用提示注入清洗器。
-
-## 4. ADR 阅读路径
-
-建议按以下顺序阅读，不要直接跳到检查项：
-
-1. **先读背景与决策总览**
-   [`docs/adr/0001-failure-semantics.md`](docs/adr/0001-failure-semantics.md) 第 1–2 节，理解为什么所有机制在同一条管线。
-2. **再读五组决策**
-   第 3 节依次是注册/发现/版本、递归 Schema、白名单/租户/确认、韧性、失败回喂。每组都包含备选方案和 trade-off。
-3. **用检查项审工具**
-   第 4 节可直接作为新增、替换或审查工具时的逐项清单。
-4. **用证据反驳或确认文档**
-   第 6 节列出测试与提交；第 7 节保留 D017 初稿，避免把后来的实现倒填成早期决策。
-5. **最后读真实复盘**
-   [`docs/weekly/2026-w50.md`](docs/weekly/2026-w50.md) 按 D027 → D028 → D029 → D030 解释实现证据与“不能推出的结论”。
-
-源码对照顺序：
+## 3. 正常任务的 9 步真实串联
 
 ```text
-src/core/tool.ts
-  → src/tools/registry.ts
-  → src/tools/schema.ts
-  → src/tools/resilience.ts
-  → src/tools/errors.ts
-  → src/runtime/loop.ts
+list_dir
+  ↓ 确认工作区输入
+read_file(quality-gate.json)
+  ↓ configJson
+run_command(node --test --test-reporter=tap)
+  ↓ 完整命令 JSON（含 stdout / exitCode）
+parse_tap_output
+  ↓ summaryJson
+evaluate_test_gate(configJson + summaryJson)
+  ↓ passed=true 时才继续
+render_release_report(gateResultJson)
+  ↓ 同一份 Markdown 文本
+sha256_text(text) ─────────┐
+  ↓ expectedSha256         │
+write_file(content)        │
+  ↓                        │
+verify_file_sha256(path) ←─┘
+  ↓ matched=true
+最终回答：2/2 通过 + 报告路径 + 实际摘要
 ```
 
-## 5. D027–D030 复盘结论
+关键不是工具数量，而是参数依赖。自动化测试逐项比较：
 
-| 日 | 真实实现带来的主要结论 | 定向测试 |
-| --- | --- | --- |
-| D027 | 发现、执行、版本和策略必须共享同一条目；按轮刷新让替换/注销生效 | 11 |
-| D028 | 参数错误必须在副作用前变成带路径的可修复结果；Schema 子集必须明示边界 | 35 |
-| D029 | 不可见不能替代执行鉴权；敏感批准必须绑定本次参数，不能永久放行 | 10 |
-| D030 | 超时、重试、队列、熔断要按“尝试/逻辑调用”区分组合，不能只堆错误码 | 40 |
+- `parse_tap_output.commandResultJson === run_command` 的原始结果；
+- `evaluate_test_gate.configJson === read_file` 的原始结果；
+- `evaluate_test_gate.summaryJson === parse_tap_output` 的原始结果；
+- 渲染器收到门禁原始结果；
+- 摘要工具和写入工具收到完全相同的渲染文本；
+- 文件核验的预期值来自 `sha256_text` 的真实输出。
 
-合计 **4 个测试文件、96 个测试通过**。全量回归为 **36 个测试文件、336 个测试通过**；V8 覆盖率为 **Statements 94.08%、Branches 90.42%、Functions 99.53%、Lines 95.38%**。
+Provider 通过当轮 `ChatRequest.messages` 查找之前的 tool 消息，没有绕开 Harness 读取另一份隐藏结果。
 
-本周做得好的地方是：非法替换保留旧工具、隐藏工具不泄露 Schema、确认异常脱敏、迟到 rejection 被消费、重试不绕过幂等、队列和 half-open 都有界、失败结果仍可回喂。
+## 4. 失败行为：测试红了就不能出报告
 
-仍需保留的边界是：没有版本协商、完整 Schema、生产 IAM、持久审计、分布式状态、总耗时预算、随机退避、通用资源强杀或工具输出信任系统。这些在复盘中记录为待独立决策的问题，不在 D031 偷渡实现。
+`runD032Demo(output, { fixture: 'failing' })` 使用同一套 Loop、Registry 和工具，只把临时测试改成一通过、一失败：
 
-## 6. 可运行验证
+1. `run_command` 真实返回 `exitCode=1` 和 `isError=true`；
+2. Loop 把错误结果作为 tool 消息回喂，而不是丢弃现场；
+3. 解析器仍能从命令 JSON 的 TAP stdout 得到 `pass=1、fail=1`；
+4. 门禁返回 `passed=false`，原因包含失败数和退出码；
+5. Provider 在第五步后直接给出“发布门禁未通过……未生成报告”；
+6. 不调用渲染、摘要、写入和文件核验工具，磁盘上没有发布报告。
 
-### 环境准备
+另外，`render_release_report` 自身也拒绝 `passed !== true`，避免其他调用方绕过门禁。非法参数在执行前被 Registry 的 Schema 校验拦截；文件摘要不匹配时校验工具明确失败。
 
-干净检出且尚未安装依赖时：
+## 5. 运行方式
+
+### 环境
+
+- Node.js 24；本日实际使用 `v24.19.0`。
+- 原生 TypeScript ESM，无 Babel、ts-node 或 tsx。
+- 不请求网络，不需要 API Key，不新增运行时依赖。
+- 干净检出尚未安装开发依赖时先运行 `npm ci`。
+
+### 一键 Demo
 
 ```bash
-npm ci
+npm run demo:d032
 ```
 
-本次实际复查环境为 macOS、Node.js `v24.19.0`、npm `11.17.0`；这不是对最低 Node 版本的新承诺。
+预期看到：10 个注册工具、9 个编号步骤、每步参数摘要和结果摘要、最终回答、报告正文以及 `D032 Demo PASS`。
 
-### 只复查 D027–D030
+重新生成可提交终端证据：
 
 ```bash
-npx vitest run \
-  test/d027-tool-registry.test.ts \
-  test/d028-schema-validation.test.ts \
-  test/d029-permissions.test.ts \
-  test/d030-resilience.test.ts \
-  --coverage.enabled false
+npm run demo:d032 > evidence/d032-transcript.txt
 ```
 
-预期：4 个文件、96 个测试通过。参数化测试会展开计数，所以数量多于测试源码中的 `it` 标题数。
+临时工作区在成功和失败路径都会清理，因此报告正文保留在终端证据中，不伪装成仍存在的临时文件。
 
-### 全量检查
+### 定向测试
+
+```bash
+npx vitest run test/d032-multi-tool-demo.test.ts --coverage.enabled false
+```
+
+4 个测试分别覆盖：
+
+1. 恰好 10 个名称唯一、描述和 Schema 完整的工具，非法参数被拦截；
+2. 9 步正常顺序、逐步原始参数依赖、最终回答、报告、摘要和目录清理；
+3. 测试失败后保留证据、门禁停止、不写报告；
+4. 标准 SHA-256 向量和文件摘要不匹配。
+
+### 全量检查与覆盖率
 
 ```bash
 npm run check
-```
-
-它依次执行：
-
-```bash
-npm run lint       # eslint .
-npm run typecheck  # tsc --noEmit
-npm run test       # vitest run
-```
-
-`npm run check` 不包含 Prettier。独立运行 `npx prettier --check "src/**/*.ts" "test/**/*.ts"` 时，当前会对 68 个既有源码/测试文件报告格式差异；D031 未修改这些文件，因此没有批量格式化制造无关变更。此项不是 `npm run check` 的失败。
-
-### 覆盖率
-
-```bash
 npm run test:coverage
 ```
 
-阈值来自 `vitest.config.ts`：Statements/Lines/Functions ≥ 80%，Branches ≥ 75%。HTML 报告位于 `coverage/`。
+`check` 依次执行 ESLint、TypeScript `--noEmit` 和全部 Vitest。覆盖率阈值保持 Statements/Lines/Functions ≥ 80%、Branches ≥ 75%。
 
-### 对照真实提交
+## 6. 真实证据与录屏说明
+
+本日证据文件是 [`evidence/d032-transcript.txt`](evidence/d032-transcript.txt)。它由上述真实 `npm run demo:d032` 命令重定向生成，包含：
+
+- 实际注册顺序；
+- 实际工具调用顺序；
+- 每步参数和结果摘要；
+- 实际 Node TAP 解析结果；
+- 实际报告文本；
+- 实际 SHA-256：`dd547123cb1eb56cb69340c20aa5d4ac8fb661a884f2b0a7076667a69249603d`；
+- 最终回答和 PASS 断言。
+
+**本日未生成完整链路录屏视频。** 当前没有可靠录屏产物，所以不用静态图、拼接终端文本或口头声明冒充视频；交付物明确降级为可重跑、可 diff 的真实终端 transcript。任务卡中的录屏目标不能据此标记为已有视频证据。
+
+## 7. 本日 TDD 记录
+
+严格按 RED → GREEN 执行：
+
+### RED
+
+先创建 `test/d032-multi-tool-demo.test.ts`，再运行：
 
 ```bash
-git show f50ae01  # D027 工具注册与发现
-git show 9f58c37  # D028 Schema 与参数校验
-git show e741f4d  # D028 删除旧占位文件
-git show fc050c0  # D029 权限边界
-git show 6a59ec1  # D030 韧性执行器
+npx vitest run test/d032-multi-tool-demo.test.ts --coverage.enabled false
 ```
 
-## 7. 诚实的验证范围与限制
+实际失败原因：
 
-- D031 只修改文档；`npm run check` 证明既有代码和测试仍通过，**不会自动证明 ADR 每句话完整或未来设计正确**。
-- D027–D030 定向测试使用 spy、脚本化 ModelProvider、可控 Promise 和 fake timers；没有调用真实模型来判断模型一定会修复错误。
-- 没有外部租户服务、生产身份系统、真实审批 UI、跨进程/跨实例一致性或生产故障注入验证。
-- fake timers 验证状态机，不是 wall-clock 性能测试；96 个定向测试、336 个全量测试和高覆盖率也不是压力测试或可靠性百分比。
-- 通用超时只保证 Harness 的 settle 语义；资源是否真正停止仍取决于工具对 AbortSignal 的响应。
-- 未深冻结 Tool/Schema/metadata，Registry 不是恶意进程内代码的安全沙箱。
-- 包版本保持 `0.1.0`；本日不发布 v0.3，不合并 main，不实现 D032。
+```text
+Cannot find module '../src/demo/d032-tools.ts'
+```
 
-## 8. 完成标准
+失败发生在生产模块尚不存在时，证明测试不是给既有实现补写的永久绿灯。
 
-- [x] ADR-001 状态、背景、已采用决策、备选方案、trade-off、后果与证据完整。
-- [x] 覆盖注册/发现/版本、递归 Schema、白名单/租户/逐次确认、四类韧性和失败回喂。
-- [x] 保留 D017 初稿演进，不伪造新的决策日期或外部反馈。
-- [x] D027–D030 复盘基于真实 README、代码、diff 和测试。
-- [x] 提供可运行的定向、全量与覆盖率验证命令。
-- [x] 不写运行时代码、不改包版本、不提前发布、不展开 D032。
+### GREEN
+
+随后最小实现工具、Demo、入口和导出，再次运行同一命令：**1 个文件、4 个测试全部通过**；`npm run typecheck` 同步通过。
+
+本日最终全量验证结果：
+
+- `npm run check`：ESLint、TypeScript 和全量 Vitest 均通过，**37 个测试文件、340 个测试**；
+- `npm run test:coverage`：同为 **37/340 全部通过**；
+- Statements **93.61%**、Branches **89.41%**、Functions **99.59%**、Lines **95.22%**，全部超过项目阈值。
+
+npm 仅输出当前环境已有的 `Unknown user config "home"` 配置提醒，不影响任何命令退出码或测试结论；本日没有修改该用户级 npm 配置。
+
+## 8. 设计取舍与限制
+
+- **脚本化 Provider ≠ 真实模型规划。** 本日证明 Harness 的真实串联、消息回喂和工具副作用，不声称模型在开放任务上一定能选出同样顺序。
+- **离线 ≠ 工具都是纯函数。** `run_command` 和文件工具确实产生进程/文件行为；只是所有行为局限于自动创建并清理的临时工作区，且命令固定为本地 Node 测试。
+- **`run_command` 不是安全沙箱。** 它经系统 shell 执行命令，不能把本 Demo 的固定命令误解为任意命令隔离能力。
+- **TAP 解析是明确子集。** 当前读取 Node TAP 的 `# tests/# pass/# fail/# skipped/# todo` 汇总，不是完整 TAP 标准实现，也不是通用测试框架适配器。
+- **质量门禁不是发布平台。** 只有 minPass、maxFail 和退出码规则，没有覆盖率门禁、审批、签名、部署或远端状态。
+- **SHA-256 只证明内容一致。** 它不是数字签名，不能证明作者身份，也不能防御恶意工作区或恶意进程内代码。
+- **10 个工具不是全局默认值。** 只有 D032 的 `createD032Tools()` 组合恰好 10 个；内置工具清单不被本日Demo污染。
+- **transcript 不是性能或外部反馈证据。** 它证明本次本地执行，不证明压力表现、生产可靠性、用户采纳或公开发布。
+- 版本保持 `0.1.0`；本日不实现 D033/MCP，不推进 G2/v0.3，不合并 main。
+
+## 9. 完成标准
+
+- [x] 恰好注册 10 个名称唯一、用途和 Schema 清晰的工具。
+- [x] 一个完整任务通过真实 AgentLoop + ToolRegistry 串联 9 个不同工具，超过至少 4 个的要求。
+- [x] 后续参数来自前序真实 tool 消息，输出实际顺序、参数摘要、结果摘要和最终回答。
+- [x] 覆盖正常链路、精确顺序、测试失败门禁、Schema 拒绝和摘要不匹配。
+- [x] 提供 `npm run demo:d032`，确定性、零新增运行时依赖、Node 24 原生 TS ESM。
+- [x] 以真实终端输出生成 transcript；明确说明未生成视频，不伪造录屏。
+- [x] 保持范围在 D032，不提前实现后续任务。
