@@ -1,0 +1,29 @@
+$ node --version
+v24.19.0
+
+$ npm run demo:d039
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 demo:d039
+> node scripts/d039-reconnect.ts
+
+D039 deterministic cross-process MCP demo; clientPid=21992
+connection=1 clientFactory=created initialize=request
+connection=1 initialize=ok protocol=2025-11-25 server=d039-deterministic-test-server@1.0.0
+connection=1 notifications/initialized=sent
+connection=1 tools/list=ok names=echo,disconnect
+tools/call id=d039-first-echo name=echo arguments={"message":"before-disconnect"}
+tools/call id=d039-first-echo result=ok serverPid=21993 content="D039 echo message=\"before-disconnect\" serverPid=21993"
+tools/call id=d039-disconnect name=disconnect arguments={}
+failureCode=TRANSPORT_ERROR message="MCP Server 提前退出（code=42, signal=null）"
+connection=1 oldClientClosed=true failedCallReplayed=false
+connection=2 clientFactory=created initialize=request
+connection=2 initialize=ok protocol=2025-11-25 server=d039-deterministic-test-server@1.0.0
+connection=2 notifications/initialized=sent
+connection=2 tools/list=ok names=echo,disconnect
+tools/call id=d039-recovered-echo name=echo arguments={"message":"after-reconnect-independent-call"}
+tools/call id=d039-recovered-echo result=ok serverPid=21994 content="D039 echo message=\"after-reconnect-independent-call\" serverPid=21994"
+recovery=ok oldServerPid=21993 newServerPid=21994 failedCallReplayed=false
+cleanup clients=2 closed=true
+D039 PASS clients=2 firstServerPid=21993 recoveredServerPid=21994 failedCallReplayed=false
+exitCode=0
