@@ -12,7 +12,7 @@ export const readFileTool: Tool = {
   parameters: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: '相对工作区的文件路径，例如 src/cli/main.ts' },
+      path: { type: 'string', minLength: 1, description: '相对工作区的文件路径，例如 src/cli/main.ts' },
     },
     required: ['path'],
     additionalProperties: false,
@@ -54,7 +54,7 @@ export const listDirTool: Tool = {
   parameters: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: '相对工作区的目录路径，默认为 .' },
+      path: { type: 'string', minLength: 1, description: '相对工作区的目录路径，默认为 .' },
     },
     required: [],
     additionalProperties: false,

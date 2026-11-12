@@ -13,8 +13,8 @@ export const editFileTool: Tool = {
   parameters: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: '相对工作区的文件路径' },
-      oldText: { type: 'string', description: '必须唯一匹配的原文，不支持正则' },
+      path: { type: 'string', minLength: 1, description: '相对工作区的文件路径' },
+      oldText: { type: 'string', minLength: 1, description: '必须唯一匹配的原文，不支持正则' },
       newText: { type: 'string', description: '替换后的文本，可以为空字符串' },
     },
     required: ['path', 'oldText', 'newText'],

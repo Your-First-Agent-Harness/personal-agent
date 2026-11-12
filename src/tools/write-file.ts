@@ -11,7 +11,7 @@ export const writeFileTool: Tool = {
   parameters: {
     type: 'object',
     properties: {
-      path: { type: 'string', description: '相对工作区的文件路径' },
+      path: { type: 'string', minLength: 1, description: '相对工作区的文件路径' },
       content: { type: 'string', description: '要写入的完整文本' },
       overwrite: { type: 'boolean', description: '已存在时是否覆盖，默认 false' },
     },
