@@ -1,157 +1,171 @@
-# D015 · 综合修复 Demo：从失败测试到可验证修复
+# D016 · 非法参数处理：校验 → 修复提示 → 重试上限 → 放弃
 
-## 今天要做出的东西
+> 课程日期：2026-11-26
 
-用一个临时项目把 D006–D014 串成完整闭环：模型读取有错误的 `math.js`，运行 Node 原生测试并看到失败，精确编辑源码，再次运行测试成功，最后才声明完成。
+## 今天的目标
 
-这里有两条验证路径，结论不能互相替代：
+今天不新增一套参数校验器，而是用端到端回归测试证明已有的“非法参数恢复闭环”真正成立：
 
-- **确定性集成测试**：脚本化 Provider 固定返回五步响应，真实执行内置工具、Session、Loop 和事件收集器，每次结果都可重复。
-- **真实 ARK 验证**：复用同一条生产 Loop，但模型行为不可预设；脚本最后独立复跑测试，不能只相信模型说“已修复”。真实模型结果不进入 CI。
+1. 模型给出非法 JSON，错误作为 tool 消息回喂；下一轮修正为合法参数后，工具真实执行成功，最终 `completed`。
+2. 模型给出不符合 Schema 的参数，字段错误与修复提示回喂；下一轮修正后成功，最终 `completed`。
+3. 连续三次非法参数不会让进程崩溃，也不会执行工具；Provider 恰好收到三次请求，Loop 以 `tool_errors` 停止。
+4. 一次合法成功会清零此前的连续错误计数；成功之后重新累计到三次才停止。
 
-## 一条消息如何走完整个 Harness
+交付物是 `test/d016-invalid-arguments.test.ts` 和本页教学内容。测试使用脚本化 Provider、真实 `ToolRegistry`、真实 `runAgentLoop` 和一个记录实际执行次数的 `echo` 工具，不访问真实模型。
+
+## 与 D014、D015 的关系
+
+D014 已经实现本日依赖的全部生产机制：
+
+| 机制 | 现有位置 | 作用 |
+| --- | --- | --- |
+| JSON 解析 | `src/tools/registry.ts` | 解析失败返回 `INVALID_JSON`，不进入工具实现 |
+| Schema 子集校验 | `src/tools/schema.ts` | 检查类型、必填字段、额外字段和枚举等子集 |
+| 标准错误与 hint | `src/tools/errors.ts` | 形成 `content`、`isError` 和内部 `error` 详情 |
+| 错误回喂 | `src/runtime/loop.ts` | 把每次 assistant/tool 配对加入历史，再问 Provider |
+| 连续错误保险丝 | `src/runtime/loop.ts` | 默认上限为 3，成功清零，达到上限返回 `tool_errors` |
+
+D014 的测试还覆盖了同轮 `fail → fail → success → fail → fail → fail`：通用工具错误也会被成功调用清零。D015 则验证了失败测试回喂后编辑、复测成功的综合修复流程。
+
+D016 补的是另一层证据：**非法参数从 Provider 原始字符串出发，穿过 Registry、消息历史、下一轮 Provider 请求和终止条件**。因此本日没有重复实现 D014 的功能，也没有为了制造差异修改生产代码。
+
+## 恢复闭环的完整时序
+
+### 1. 坏消息不直接抛穿 Loop
+
+模型发出的 `ToolCall.arguments` 是原始字符串。Registry 先查工具，再解析 JSON、校验 Schema，最后才调用 `execute`：
 
 ```text
-Session 完整历史
-  → buildContext 生成本次请求窗口
-  → Provider 返回文本或 tool_calls
-  → AgentEvent 记录模型与工具事实
-  → ToolRegistry 解析并校验参数
-  → 工具执行，得到 ToolResult
-  → content 回喂模型；isError 驱动错误语义
-  → 成功继续 / 错误修正 / 连续错误保险丝停止
-  → Session 保存本轮完整新增历史
+Provider 返回非法 tool_call
+  → Loop 保存 assistant 消息
+  → Registry 解析 / 校验失败
+  → 工具 execute 没有被调用
+  → 得到 isError: true 的 ToolResult
+  → Loop 保存对应 tool 消息，连续错误数 +1
+  → 未达到上限，进入下一轮
 ```
 
-### 1. Session 保存完整历史，buildContext 只决定本次发什么
+非法 JSON 的模型线反馈包含：
 
-`Session` 是跨轮真源。每次运行前取快照，Loop 返回后只追加 `result.messages.slice(before.length)`，因此用户消息、每次 assistant 工具调用、对应 tool 结果和最终回答都按原顺序保留。D015 集成测试最后直接断言：
+```text
+工具参数不是合法 JSON
+提示：请把 arguments 修正为合法 JSON 对象
+```
+
+Schema 类型错误则指出具体路径和期望类型，例如：
+
+```text
+参数校验失败：$.value，期望 string，实际为 number（期望 string）
+提示：请修正 $.value：期望 string；期望 string，实际为 number
+```
+
+`content` 是 Provider 下一轮能看到的 tool 消息；内部 `error.code/message/retryable/hint` 供 Harness 和调用方使用。测试直接检查第二次 Provider 请求的最后一条消息，而不是只检查 Registry 的单独返回值，因此能证明“修复提示确实回喂”。
+
+### 2. 修正不是自动重放旧参数
+
+第一轮错误不会触发 Harness 用原参数自动再执行一次。真正的恢复过程是：
+
+```text
+第 1 轮：assistant(arguments = 非法值)
+         → tool(错误与 hint)
+第 2 轮：Provider 看到错误
+         → assistant(arguments = 修正值)
+         → Registry 校验通过
+         → 工具真实执行
+         → tool(成功内容)，连续错误数清零
+第 3 轮：Provider 看到成功结果
+         → assistant(最终文本，无 tool_calls)
+         → stopReason = completed
+```
+
+这里的“重试”是模型根据反馈生成一次新的工具调用。是否知道如何修正，是模型行为；是否保留错误上下文、是否阻止坏参数执行、是否设置终止上限，是 Harness 的职责。
+
+### 3. 连续三次后放弃，而不是无限请求
+
+Loop 对整个 run 维护一个连续错误计数：
 
 ```ts
-expect(session.snapshot()).toEqual(result.messages);
+consecutiveToolErrors = toolResult.isError === true
+  ? consecutiveToolErrors + 1
+  : 0;
+
+if (consecutiveToolErrors >= maxConsecutiveToolErrors) {
+  return { stopReason: 'tool_errors', /* ... */ };
+}
 ```
 
-Loop 每轮不会无界发送全部历史，而是调用 `buildContext(messages, maxContextChars)` 得到裁剪副本。请求窗口可以省略旧内容，Session 完整历史不因此被截断；assistant 的 `toolCalls` 与其 tool 消息作为一组处理，避免给模型半次调用。
+默认值是 3。第三次非法参数仍然会形成 assistant/tool 历史，但不会再发起第四次 Provider 请求，也不会把异常抛给调用方。结果是 `turns: 3`、`stopReason: 'tool_errors'`、`text: ''`。
 
-### 2. AgentEvent 观测事实，但不替代消息历史
+这个计数是所有连续工具错误共用的保险丝，不是“每种错误各有三次”，也不是“每个工具各有三次”。任何一次成功工具结果都会清零。
 
-模型响应后，Loop 先写入 assistant 消息并发出 `assistant_responded`。每个工具调用再依次产生：
+## 四个确定性测试场景
 
-```text
-tool_call_started → 执行工具 → tool_call_finished
+测试工具名为 `echo`，只接受一个字符串字段：
+
+```json
+{
+  "type": "object",
+  "properties": { "value": { "type": "string" } },
+  "required": ["value"],
+  "additionalProperties": false
+}
 ```
 
-`tool_call_finished` 带有 `toolCallId`、`toolName` 和 `isError`。事件适合日志、UI 和测试观测；真正交给下一轮模型的是历史里的 assistant/tool 配对，而不是事件数组。
+工具的 `execute` 会记录收到的参数并返回 `echo:<value>`。所以 `executions` 既能证明合法调用真的发生，也能证明非法调用没有越过 Registry。
 
-### 3. Registry 在执行前把坏消息变成可修正结果
+脚本化 Provider 按数组下标依次返回响应，同时保存每次请求的消息快照；脚本耗尽后会拒绝额外请求。Registry 和 Loop 不使用替身。
 
-Registry 固定完成名称查找、JSON 解析和 Schema 子集校验，再调用工具。未知工具、非法 JSON 或参数错误不会进入工具实现，也不会直接炸掉 Loop，而是形成带 `isError: true` 的 `ToolResult`。
+| 测试 | Provider 脚本 | 核心断言 |
+| --- | --- | --- |
+| 非法 JSON 后恢复 | 非法 JSON → 合法字符串参数 → 最终文本 | 第二轮请求含 `INVALID_JSON` 对应反馈和 hint；工具只执行修正后的参数；第三轮看到成功 tool 消息；最终 `completed` |
+| Schema 错误后恢复 | `value: 42` → `value: "schema-ok"` → 最终文本 | 第二轮请求包含 `$.value`、期望 `string` 和字段 hint；只执行合法值；最终 `completed` |
+| 三次非法参数后放弃 | 非法 JSON → 类型错误 → 缺少必填字段 | 工具执行次数为 0；Provider 恰好 3 次；三类错误依次回喂；最终 `tool_errors`，无第四次请求 |
+| 成功后重新计数 | 非法 JSON → Schema 错误 → 合法成功 → 非法 JSON → Schema 错误 → 非法 JSON | 合法工具只执行一次；成功结果进入第四轮请求；运行到第 6 轮才达到新一组三次错误并以 `tool_errors` 停止 |
 
-`ToolResult` 有两条通道：
+最后一个场景也能识别“忘记清零”的缺陷：如果第三次合法调用没有清零，第四次非法 JSON 就会凑成连续第三次错误并提前停止，不可能到达第六轮。
 
-- `content` 写入 `role: "tool"` 消息，是 Provider 能看到的模型线格式；
-- `error` 保留内部 `code/message/retryable/hint`，Provider 不需要理解这些内部错误码。
+它与 D014 的同轮清零测试互补：D014 覆盖一轮内多个通用工具结果，D016 覆盖跨 Provider 请求的非法参数序列。
 
-`run_command` 非零退出时，`content` 仍保留命令、`exitCode`、stdout、stderr 等 JSON 字段，同时以 `isError: true` 和内部 `COMMAND_FAILED` 表示失败。
-
-### 4. 错误回喂让模型修正，成功会继续并清零
-
-工具失败不等于整次运行失败。未达到连续错误上限时，tool 消息进入历史，下一次 Provider 请求能看到失败详情并选择下一步。成功工具继续同样的回喂流程，同时把连续错误计数清零。
-
-保险丝属于整个 run：
-
-```text
-工具失败：consecutive += 1
-工具成功：consecutive = 0
-consecutive >= maxConsecutiveToolErrors：以 tool_errors 停止
-```
-
-D015 默认配置为 3。第一次测试失败只计数到 1，所以仍有机会编辑；编辑成功把计数清零，复测成功后最终请求能看到 `exitCode: 0`，模型才给出完成文本并以 `completed` 停止。
-
-## 确定性五步修复闭环
-
-测试在系统临时目录写入：
-
-```js
-// math.js
-export function add(a, b) { return a - b; }
-
-// math.test.js
-import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { add } from './math.js';
-test('add', () => { assert.equal(add(2, 2), 4); });
-```
-
-脚本化 Provider 只返回以下五次结果，不多走一步：
-
-| Turn | assistant 动作 | 真实工具结果 | 下一次请求可见的信息 |
-| --- | --- | --- | --- |
-| 1 | `read_file("math.js")` | 读到 `return a - b` | 源码内容 |
-| 2 | `run_command(node --test math.test.js)` | `exitCode: 1`，输出含 `failing`，完成事件 `isError: true` | 失败命令与测试输出 |
-| 3 | `edit_file`，把 `return a - b` 精确替换为 `return a + b` | 返回 unified diff，成功清零连续错误计数 | 编辑结果 |
-| 4 | 再次运行同一测试命令 | `exitCode: 0`，完成事件 `isError: false` | 成功测试输出 |
-| 5 | 返回“修复完成，测试已通过” | 不再调用工具 | `run_completed`，`stopReason: completed` |
-
-集成测试使用真实 `createBuiltinTools()`、`ToolRegistry`、`Session` 和 `runAgentLoop`，配置 `maxTurns: 8`、`maxContextChars: 24000`、`maxConsecutiveToolErrors: 3`。除上述结果外，还检查：
-
-- 五轮请求的完整 assistant/tool 配对和精确事件顺序；
-- 第一次失败出现在第三次 Provider 请求，第二次成功出现在最终 Provider 请求；
-- 通过 spy 观察真实 Registry 返回值，首次命令为 `COMMAND_FAILED` 且 `retryable: true`，复测成功不携带 `error`；
-- `math.js` 最终逐字等于修复后的源码；
-- 最终 `turns: 5`、`stopReason: completed`；
-- Session 快照等于 `result.messages`；
-- 无论断言成败都在 `finally` 删除临时项目。
-
-## 怎么复现
-
-### 确定性验证
+## 怎么运行
 
 ```bash
-git switch D015
+git switch D016
 npm install
-npx vitest run test/d015-integration.test.ts
+npx vitest run test/d016-invalid-arguments.test.ts
 npm run check
 npm run test:coverage
 ```
 
-这些测试不需要真实模型或凭据。2026-11-12 实测：D015 集成测试首次运行直接通过，这是既有实现上的 **characterization/integration test 首次通过**，没有人为制造 RED；全量检查为 **16 个测试文件、159 项测试全部通过**。
+这些命令不需要模型密钥，也不访问真实模型。测试没有读取或写入 `.env`。
 
-同次覆盖率实测：
+本次实际结果：
 
-| 指标 | 覆盖率 |
+- 针对性测试：**1 个文件、4 项测试通过**。
+- `npm run check`：ESLint、TypeScript 类型检查和全量测试均通过；共 **17 个测试文件、163 项测试**。
+- `npm run test:coverage`：同样 **17 个测试文件、163 项测试全部通过**。
+
+| 覆盖率指标 | 实测结果 |
 | --- | ---: |
 | Statements | 96.60% |
 | Branches | 91.68% |
 | Functions | 98.07% |
 | Lines | 97.88% |
+| `src/runtime/loop.ts` | 四项均为 100% |
 
-### 真实 ARK 验证
+### 为什么首次通过也保留
 
-先在本地 `.env` 配置可访问的 ARK 模型名和密钥，再执行：
+四个测试都是在修改任何生产代码之前编写并首次运行的，且首次运行全部通过。这说明它们描述的是 D014/D015 已经具备的行为，而不是本日新增功能。
 
-```bash
-PA_MODEL_BASE_URL=https://ark.cn-beijing.volces.com/api/v3 npm run demo:d015
-```
+因此本日没有人为制造 RED、没有反转断言来假装修复，也没有为了产生生产差异而改动实现。这些测试作为已存在行为的 **integration/characterization regression tests** 保留：未来如果错误不再回喂、非法参数误入工具、Provider 请求次数漂移或成功不再清零，它们会失败。
 
-`demo:d015` 通过现有 `loadConfig()` 间接读取配置，不打印密钥。脚本只创建系统临时工作区，组合生产 Provider、Registry、内置工具和 Loop；模型返回后，再用独立进程执行：
+本日未进行真实模型验证，也不据此声称任何真实模型一定能自行修正参数；确定性测试验证的是 Harness 的反馈与停止机制。
 
-```bash
-node --test math.test.js
-```
+## 边界与常见误解
 
-最终摘要包含 `model`、`turns`、`stopReason`、模型文本和 `verificationExitCode`。只要 Loop 未完成或独立复测非零，脚本就以非零退出；临时目录始终在 `finally` 清理。真实模型不收敛不会被改写成成功。
-
-### 2026-11-12 真实 ARK 实测记录
-
-- 配置模型名：`ark-code-latest`。
-- 已观察事件：`turn_started`，`turn: 1`，`messageCount: 2`。
-- 第一次 Provider 请求返回 HTTP 404，错误码 `InvalidEndpointOrModel.NotFound`；服务报告该模型或 Endpoint 不存在，或当前账号无权访问。
-- 因异常发生在第一次模型响应之前，Loop 未返回 `turns`，也没有产生 `run_completed` / `stopReason`；读取、首次失败、编辑和复测事件均未发生，独立复测因此未启动。
-- 命令实际退出码为 **1**，临时目录由 `finally` 清理。该失败是模型配置/访问问题，不作为确定性 CI 用例，也不据此宣称真实 ARK 修复成功。
-
-更换为账号实际可访问的模型后可原命令重跑；应以事件流和独立 `verificationExitCode: 0` 共同判断结果。
-
-## 今天的边界
-
-本日不复制 Loop，不引入并行工具、命令沙箱、磁盘 Session 或 Replay，也不把真实 ARK 调用加入 CI。确定性测试证明 Harness 的失败回喂与修复机制；真实脚本提供同构验证入口，其实际结果必须按当次事件和退出码如实记录。
+- **Schema 校验是子集，不是完整 JSON Schema。** 本日只复用现有类型、必填字段等能力，不扩展 validator。
+- **三次是 Provider 交互轮次上限，不是执行坏参数三次。** JSON 解析或 Schema 校验失败时，工具实现一次都不会执行。
+- **第三次错误后没有第四次请求。** 最后一次 tool 错误仍保留在结果历史中，便于调用方诊断。
+- **成功清零的是连续计数，不是删除历史。** 之前的错误消息仍在消息历史里，后续请求仍可看到完整因果链。
+- **`tool_errors` 与 `max_turns` 不同。** 前者是连续工具错误保险丝，后者是模型不断要求工具时的轮数保险丝。
+- **`completed` 只表示最后一轮不再调用工具。** 测试另以工具执行记录和成功 tool 内容证明本场景确实修复成功，而不只看最终文本。
+- **脚本化 Provider 不证明真实模型会修复。** 它固定模型的下一步，让测试只验证 Harness 是否提供正确的恢复机会和停止条件。
