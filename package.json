@@ -43,6 +43,7 @@
     "demo:d032": "node scripts/d032-multi-tool.ts",
     "demo:d035": "node scripts/d035-external.ts",
     "demo:d037": "node scripts/d037-compare.ts",
+    "demo:d039": "node scripts/d039-reconnect.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
