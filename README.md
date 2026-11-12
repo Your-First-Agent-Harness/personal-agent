@@ -1,189 +1,429 @@
-# Personal Agent · 第 40 天
+# Personal Agent · 第 41 天
 
-> **D040 / D100 · v0.1.0**
-> 今日主题：**MCP 是标准还是过渡方案？**
-> 本文件是 D040 的完整教学入口，不是 `main` 索引。本日只新增课程文档并更新本入口，没有修改运行时代码、测试、依赖或协议能力。
+**进度：D041 / D100 · v0.1.0**
 
-## 1. 今日任务与诚实边界
+本日目标：把一个**小而真实的本地 Markdown 知识库**接入现有 AgentLoop。模型先通过 `knowledge_search` 找到相对路径和行号，再通过 `knowledge_read` 读取同一文档快照中的原文，最后生成带行号来源的回答。
 
-任务卡要求：**公开课：MCP 是标准还是过渡方案；公开课回放**。
+本日选择的是**内置只读知识库 Tools**，不是另做一个 MCP Server。D035～D039 的 MCP 能力保持原样；本日不引入向量数据库、embedding 服务、联网检索、动态工具检索，也不实现后续完整沙箱或通用资源治理。
 
-本轮交付的是一套可直接讲授的中文 90 分钟课程包，包含讲义、逐段讲师稿、板书/图示、互动、练习与参考答案、FAQ、课后阅读和真实来源核查。
+---
 
-**课程材料已准备，但未实际授课、无真实回放、无学员反馈。**
+## 1. 本日交付
 
-因此：
+- `src/tools/knowledge.ts`
+  - `createKnowledgeTools(root)` 在工厂调用时读取真实文件，建立一次不可变文档快照。
+  - `knowledge_search`：确定性的、大小写不敏感的逐行子串搜索。
+  - `knowledge_read`：按相对 `.md` 路径及可选一基行号闭区间读取同一快照。
+  - 拒绝绝对路径、路径穿越、非 Markdown、未知文件和非法行范围；索引跳过所有符号链接。
+- `src/demo/d041.ts`
+  - 使用真实 `AgentLoop`、真实 `ToolRegistry`、真实文件 I/O 和离线确定性模型。
+  - 第 2 次模型响应必须从真实 search 工具消息中取路径/行号，不能由 Demo 绕过 Loop 拼参数或答案。
+- `scripts/d041-knowledge.ts` 与 `npm run demo:d041`
+  - 创建明确的临时教学知识库，输出工具调用、来源、完成状态和清理状态；失败时非零退出。
+- `test/d041-knowledge.test.ts`
+  - 覆盖搜索排序、行号、片段、读取范围、Schema、白名单、错误边界、符号链接和快照更新。
+- `test/d041-demo.test.ts`
+  - 验证完整 search → read → 带引用回答的 Loop 数据依赖，而不只验证 mock。
+- `evidence/d041-transcript.txt`
+  - 本日实际运行 `npm run demo:d041` 保存的终端证据。
+- `src/index.ts` 与 `package.json`
+  - 导出必要的知识库工厂和 D041 Demo API，注册 `demo:d041`；没有新增运行时依赖。
 
-- 不提供虚构的视频链接、直播地址、授课照片或观看人数；
-- 不编造现场提问、投票结果、学员评价或反馈归档；
-- 讲师稿中的引号是备课文本，不是已发生发言的转录；
-- [`evidence/d039-transcript.txt`](evidence/d039-transcript.txt) 只属于 D039 跨进程故障演示，**不是 D040 公开课回放**；
-- 本日没有新增 `demo:d040`，也没有借旧 Demo 假装举办了课程。
+---
 
-## 2. 从这里开始学习
+## 2. 架构与数据流
 
-| 学习顺序 | 材料 | 内容 | 用法 |
-| --- | --- | --- | --- |
-| 1 | [完整公开课讲义](docs/d040-public-course.md) | 90 分钟课程、核心争论、协议与传输、安全、治理、仓库证据、决策与迁移 | 学员主读物，讲师投影 |
-| 2 | [逐段讲师稿](docs/d040-instructor-script.md) | 每段可直接讲授的中文话术、板书动作、互动与无回应兜底 | 讲师备课或复讲 |
-| 3 | [互动、练习、答案与 FAQ](docs/d040-exercises.md) | 8 组练习、退出题、100 分量规、15 个 FAQ | 先遮住答案独立完成 |
-| 4 | [来源与核查记录](docs/d040-sources.md) | 28 个真实 HTTPS 来源、准确标题、事实映射、访问日期、HTTP 结果和失败项 | 核对行业事实与版本时效 |
-
-建议先读讲义第 1、2、8、9 节建立争论地图，再按 90 分钟顺序学习。若准备授课，直接使用讲师稿的时间段和互动指令；若自学，完成 E1–E8 后用评价量规检查。
-
-## 3. 核心争论地图
-
-本课不回答一个脱离场景的“是/否”，而把命题拆成五层证据：
+本日没有另造执行链，仍使用项目已有契约：
 
 ```text
-① 协议规范：共同语言是否公开、明确版本、可审阅？
-② SDK / 实现：实现是否完整、维护一致、通过一致性测试？
-③ Server 生态：可发现之外，质量、维护与供应链怎样？
-④ 企业采用：是否进入真实权限、审计、采购和运维流程？
-⑤ 实际互操作：哪个 Client×Server×版本×传输×能力组合通过了什么测试？
+用户问题
+  │
+  ▼
+AgentLoop
+  │  把 ToolRegistry.list() 提供的 Schema 交给 ModelProvider
+  ▼
+离线确定性 ModelProvider
+  │  第 1 次：knowledge_search({ query: "发布窗口" })
+  ▼
+ToolRegistry
+  ├─ 工具名解析
+  ├─ D029 白名单权限
+  ├─ D028 JSON Schema 校验
+  └─ 统一 ToolResult / ToolError
+          │
+          ▼
+  createKnowledgeTools 创建的共享 Markdown 快照
+          │
+          ▼
+真实 tool 消息：operations/release.md，第 3 行
+  │  回喂 AgentLoop，进入第 2 次模型调用
+  ▼
+knowledge_read({
+  path: "operations/release.md",
+  startLine: 3,
+  endLine: 3
+})
+  │
+  ▼
+真实 tool 消息：带行号的原文
+  │  回喂 AgentLoop，进入第 3 次模型调用
+  ▼
+最终回答 + 来源 operations/release.md:3
 ```
 
-### 支持“正在形成持久开放标准”的依据
+两个工具闭包共享同一个 `ReadonlyMap<string, KnowledgeDocument>`。搜索返回的路径一定可以用读取工具在同一快照中查找；如果它已被删除或本来不在快照中，则返回明确错误，不会退回到任意文件系统读取。
 
-- 公开、版本化的协议规范，以及明确的生命周期、传输和 Tools 等能力定义；
-- 公开治理、SEP、Feature Lifecycle、SDK tiers 与一致性意识；
-- Linux Foundation 于 2025-12-09 宣布 AAIF，MCP 是创始贡献项目之一；
-- Agent 发现和调用外部能力是需要长期解决的集成问题。
+### 与 MCP 的边界
 
-### 支持“可能成为过渡方案”的条件
+D036 已提供 filesystem MCP server，D037 已验证官方 client 接入。本日的两个工具直接注册进进程内 `ToolRegistry`，调用不经过 stdio、MCP transport 或 client。这样可以用最小实现讲解“知识库快照与引用”，同时复用既有 Loop、Schema、权限和错误契约。
 
-- 2025-11-25 到 2026-07-28 的状态模型和协商机制演进带来迁移成本；
-- 模型私有工具 Schema、结果信封、缓存、过滤和审批仍需转换；
-- stdio 进程或 Streamable HTTP 会话都有实际安全和运维成本；
-- SDK/Server 质量不均，Registry 可发现不等于代码安全；
-- 少量稳定内部 API 使用直连 OpenAPI/REST 可能更简单。
+---
 
-### 本课结论
+## 3. 最小接入方式
 
-**MCP 可以既是开放标准进程中的通用协议候选，又是某些团队当前架构中的过渡层。** 选择应固定到版本、工作负载、目标组合证据、安全门槛和退出成本。课程不提供绝对技术预测或投资建议。
+```ts
+import { ToolRegistry, createKnowledgeTools } from 'personal-agent';
 
-### 三个“不等于”
+const registry = new ToolRegistry({
+  allowedTools: ['knowledge_search', 'knowledge_read'],
+});
 
-1. **标准化不等于零适配**：真实 SDK 仍需 MCP Tool→模型工具、Schema 和结果映射。
-2. **标准化不等于安全边界**：认证不等于授权，OAuth token 不等于业务权限，Registry 不等于代码审计。
-3. **标准化不等于模型能力**：协议互通不保证模型会选对工具、填对参数或完成业务任务。
+for (const tool of createKnowledgeTools('/absolute/path/to/markdown-kb')) {
+  registry.register(tool);
+}
+```
 
-## 4. 90 分钟课程结构
+随后把这个 `registry` 传给现有 `runAgentLoop` 即可。根目录在工厂调用时通过 `realpathSync` 固定；`ToolContext.workspaceRoot` 不会替换知识库根目录。
 
-| 时间 | 主题 | 关键问题 |
-| --- | --- | --- |
-| 0–6 分钟 | 诚实边界与开场投票 | 什么证据会让我改判？ |
-| 6–16 分钟 | 标准定义与五层证据 | 公告、SDK 和互操作为何不能混用？ |
-| 16–28 分钟 | 架构、生命周期、版本与能力 | 版本协商、能力协商和业务授权有何不同？ |
-| 28–40 分钟 | stdio、Streamable HTTP、会话与关闭 | 本地进程和远程服务各增加什么成本？ |
-| 40–50 分钟 | function calling、REST/OpenAPI、A2A、Schema | 为什么同名 JSON Schema 仍会不适配？ |
-| 50–56 分钟 | 休息 | 留下一个最质疑的问题 |
-| 56–66 分钟 | 认证、权限、注入与供应链 | 协议之外还缺哪些安全控制？ |
-| 66–76 分钟 | 治理、生态与正反方辩论 | 双方的适用条件和反证是什么？ |
-| 76–84 分钟 | D034–D039 仓库证据研讨 | 一个子集能证明什么、不能证明什么？ |
-| 84–90 分钟 | 决策、迁移与退出题 | 换掉 MCP 后哪些资产仍能保留？ |
+`createKnowledgeTools` 只返回两个 `Tool`，没有写入、删除、执行命令或网络访问能力。`Tool.execute` 返回 `Promise<ToolResult>`，工具结果以 JSON 字符串放入 `content`，由 Loop 作为真实 `tool` 消息回喂模型。
 
-完整图示和逐段内容见[讲义](docs/d040-public-course.md)；不需要把本入口当作讲师稿逐字朗读。
+---
 
-## 5. D034–D039：课程中的代码对应
+## 4. `knowledge_search` 契约
 
-**精确边界：D035–D039 只实现并验证 `2025-11-25 + stdio + tools` 子集，不宣称完整 MCP。**
+### 4.1 输入 Schema
 
-| 课程日 | 代码或文档 | 在 D040 中说明什么 |
-| --- | --- | --- |
-| D034 | [协议设计](docs/d034-mcp-protocol.md)、[时序](docs/d034-mcp-sequence.md) | 明确版本、stdio、Tools 子集和初始化时序；历史“当前”表述须按访问日重查 |
-| D035 | `src/adapters/mcp-stdio-client.ts`、`test/d035-mcp-client.test.ts` | 子进程、ndjson、请求关联、初始化、能力检查、ping、tools/list/call、超时与关闭 |
-| D036 | `src/adapters/mcp-stdio-server.ts`、`src/demo/d036-mcp-server.ts` | 仓库内 stdio Server 子集，不是全功能生产 Server |
-| D037 | `src/adapters/mcp-tool.ts`、`scripts/d037-compare.ts` | MCP Tool 与本地 Tool 的适配；统一协议仍需要转换层 |
-| D038 | [MCP 使用文档](docs/mcp.md)、[周复盘](docs/weekly/2026-w51.md) | 使用方式、企业边界和已知限制，不把文档当外部生态证明 |
-| D039 | `src/demo/d039.ts`、`scripts/d039-reconnect.ts`、`test/d039-reconnect-demo.test.ts` | 真实跨进程断开后创建新 Client 做独立调用；不自动重放失败请求 |
+```json
+{
+  "type": "object",
+  "properties": {
+    "query": {
+      "type": "string",
+      "minLength": 1,
+      "description": "要查找的非空白原始子串"
+    }
+  },
+  "required": ["query"],
+  "additionalProperties": false
+}
+```
 
-课程明确未实现：Streamable HTTP、Resources、Prompts、2026-07-28 的 `_meta` 每请求能力协商与 `server/discover`、Modern/Legacy/Dual-era 兼容逻辑、完整 structured content/outputSchema 生态，以及通用自动重连等。规范中存在某项能力，不等于本仓库已经实现。
+空字符串由 Registry 的 Schema 校验拒绝；只有空白的字符串由工具拒绝。两者都得到 `INVALID_ARGUMENTS`，不会变成一次“搜索全部”。
 
-## 6. 练习与自测入口
+### 4.2 搜索算法与可解释排序
 
-- **E1 证据归层**：分清规范、SDK、Server 生态、企业采用与实际互操作。
-- **E2 版本与能力**：判断版本相同、能力协商、`isError`、超时和后续版本能力。
-- **E3 传输选择**：为本地搜索和共享订单选择 stdio/HTTP，并设计关闭与恢复测试。
-- **E4 Schema 适配**：分析 strict 转换、业务校验、结果信封和三类错误。
-- **E5 安全建模**：处理 token passthrough、confused deputy、注入、跨租户与供应链。
-- **E6 条件化决策**：在两个内部 API、跨团队工具平台和高风险财务写之间做不同选择。
-- **E7 迁移盘点**：区分可保留业务资产和需替换的协议适配。
-- **E8 综合评审**：完成一页架构评审，按 100 分量规自评。
+1. 对查询做 `trim`，然后使用 JavaScript `toLowerCase()` 做大小写不敏感比较。
+2. 对快照中每个文档逐行执行原始子串匹配；包含空格的查询仍是一个完整子串，不拆词，不做同义词扩展。
+3. 一条命中结果对应一行。`score` 是查询在该行中的**非重叠出现次数**。
+4. 排序键依次为：`score` 降序、相对路径升序、行号升序。
+5. `snippet` 是该行去除首尾空白后的文本，最多 160 个字符；超长时使用 `...` 截断。它不包含额外上下文行。
+6. 没有命中是成功结果，`total: 0`、`results: []`，不是工具异常。
 
-全部题目、参考答案、退出题和 FAQ 位于[`docs/d040-exercises.md`](docs/d040-exercises.md)。答案是备课参考，不是真实学员回答。
+### 4.3 真实结果示例
 
-## 7. 来源与外部 URL 核查
+Demo 搜索 `发布窗口` 后得到：
 
-固定访问日期：**2026-11-12**。课程优先使用明确版本的 MCP 官方规范、治理公告和真实厂商公开文档；没有引用市占率、采用率或虚构行业数字。
+```json
+{
+  "query": "发布窗口",
+  "matchType": "case-insensitive-substring",
+  "ranking": "score:desc,path:asc,line:asc",
+  "total": 1,
+  "results": [
+    {
+      "path": "operations/release.md",
+      "line": 3,
+      "score": 1,
+      "snippet": "发布窗口为每周二 14:00，发布前必须完成全量测试。"
+    }
+  ]
+}
+```
 
-实际对 28 个最终引用逐一执行 `curl -L --max-time 35 --connect-timeout 12 ...`，记录 HTTP 状态、最终 URL 与内容类型：
+`path` 始终是相对知识库根目录的 `/` 分隔路径；`line` 从 1 开始。模型可以直接把这两个字段用于下一次 `knowledge_read`，并在最终答案中引用它们。
 
-- **27/28 返回 HTTP 200**；
-- **1/28 返回 HTTP 403**：OpenAI Function calling 页面。其正文在资料阅读阶段可通过页面读取工具取得，但统一 curl 检查没有通过，来源表明确保留该失败；
-- `/specification/latest` 在访问日实际跳转到 `2026-07-28`；旧 `security_best_practices`、新版生命周期和 SDK 等 URL 的真实跳转均已记录；
-- 官方版本页的 current 标记与 `latest` 解析在访问时存在不完全一致，因此课程只使用带版本和日期的有限断言，不声称无日期的“当前规范”。
+---
 
-完整命令、28 项标题、URL、事实映射和最终状态见[来源与核查记录](docs/d040-sources.md)。HTTP 200 只说明本轮页面可访问，不等于内容中的每个主张都经过独立行业审计。
+## 5. `knowledge_read` 契约
 
-## 8. 文档与全量回归验证
+### 5.1 输入 Schema
 
-### 8.1 本日验证策略
+```json
+{
+  "type": "object",
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "知识库内的相对 .md 路径"
+    },
+    "startLine": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "可选起始行，包含该行，默认为 1"
+    },
+    "endLine": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "可选结束行，包含该行，默认为最后一行"
+    }
+  },
+  "required": ["path"],
+  "additionalProperties": false
+}
+```
 
-开工前已加载 TDD 流程。本日没有运行时代码或新行为，因此没有制造无意义 RED，也没有新增测试来假装覆盖文档。验证由四部分组成：
+### 5.2 行范围规则
 
-1. D034–D039 代码、测试和文档事实核查；
-2. Markdown 相对链接检查；
-3. 外部来源的实际 HTTP 检查与失败保留；
-4. 既有 lint、TypeScript、全量测试和 coverage 回归。
+- 行号从 **1** 开始，`startLine` 和 `endLine` 都包含在结果中。
+- 两个参数都省略时读取全文；只省略 `endLine` 时读到最后一行；只省略 `startLine` 时从第 1 行开始。
+- `endLine < startLine`：拒绝，返回 `INVALID_ARGUMENTS`。
+- 任一端超过 `totalLines`：拒绝，返回 `INVALID_ARGUMENTS`，错误消息包含文档总行数；不做静默截断。
+- `0`、负数、小数、字符串行号：拒绝；整数与最小值也会先经过 Schema。
+- 空文档只在省略行范围时读取，返回 `startLine: 0`、`endLine: 0`、`totalLines: 0`、`lines: []`；对空文档指定任何范围都是 `INVALID_ARGUMENTS`。
 
-### 8.2 文档检查
+### 5.3 真实结果示例
 
-在仓库根目录执行：
+```json
+{
+  "path": "operations/release.md",
+  "startLine": 3,
+  "endLine": 3,
+  "totalLines": 4,
+  "lines": [
+    {
+      "line": 3,
+      "text": "发布窗口为每周二 14:00，发布前必须完成全量测试。"
+    }
+  ]
+}
+```
+
+读取结果保留 `totalLines`，便于调用方判断后续引用或继续读取的范围。`lines` 中每行都带独立行号，避免把截取后的数组下标误当成原文件行号。
+
+---
+
+## 6. 这不是语义 RAG
+
+本日实现刻意保持可解释、可测试、零新增依赖：
+
+| 能力 | D041 是否提供 |
+|---|---|
+| 本地 UTF-8 Markdown 文件真实读取 | 是 |
+| 大小写不敏感的逐行子串匹配 | 是 |
+| 行内出现次数、路径、行号排序 | 是 |
+| 相对路径、原文行号和片段 | 是 |
+| 分词、倒排索引 | 否 |
+| embedding、向量数据库、相似度检索 | 否 |
+| 语义改写、同义词扩展、模型重排 | 否 |
+| RAG 文档切块与向量召回 | 否 |
+| 联网搜索或第三方知识库同步 | 否 |
+
+因此，“发布窗口”可以命中包含这四个连续字符的行，但不能因为语义相近而命中“何时上线”。这不是伪 AI 搜索，也不声称具有语义理解能力。模型的职责是根据确定性的工具结果选择读取位置和组织答案；检索本身没有模型参与。
+
+---
+
+## 7. 快照如何建立与更新
+
+### 7.1 建立时发生真实文件 I/O
+
+调用 `createKnowledgeTools(root)` 时同步完成：
+
+1. `realpathSync(root)` 固定根目录，并确认它是目录。
+2. 按名称排序递归遍历目录，保证快照构建顺序确定。
+3. 只读取普通、扩展名严格为 `.md` 的文件；不读取 `.txt`、`.markdown` 或其他文件。
+4. 所有符号链接都跳过，不跟随到目标，也不递归进入链接目录。
+5. 使用 `readFileSync(path, 'utf8')` 读取真实文件，按 CRLF/LF 分行，存入内存快照。
+6. 搜索和读取只访问这个共享快照，不在每次调用时隐式重新扫描磁盘。
+
+因此，搜索和读取使用的是真实文件内容，但都具有明确的快照语义，而不是“每次 Tool 调用看到不同版本”。
+
+### 7.2 更新方式：显式重建并替换注册项
+
+本日没有文件监听器，也没有隐式 refresh。文档变化后重新调用工厂，并用现有 `ToolRegistry.replace` 替换同名工具：
+
+```ts
+// 初始快照
+for (const tool of createKnowledgeTools(root)) registry.register(tool);
+
+// 修改、增加或删除 Markdown 后，显式建立新快照
+for (const tool of createKnowledgeTools(root)) registry.replace(tool);
+```
+
+`replace` 会保持注册名不变，并确保新旧两个工具仍来自同一次新快照。不要只替换其中一个工具，否则 search 与 read 会看到不同版本。
+
+测试证明：磁盘修改后，旧 Registry 仍返回旧内容、看不到新增文件；重建后，新 Registry 才能搜索新内容并读取新增文档。
+
+---
+
+## 8. 安全约束与错误行为
+
+所有正常工具调用仍经过 `ToolRegistry`：工具名解析、白名单、Schema 校验和 `ToolResult` 错误归一化均未被绕过。
+
+| 输入或场景 | 行为 |
+|---|---|
+| `query: ""` 或全空白查询 | `INVALID_ARGUMENTS` |
+| 查询无命中 | 成功，`total: 0` |
+| 未知 `.md` 路径或新增文件尚未进入快照 | `FILE_NOT_FOUND` |
+| `.txt` 等非 Markdown 路径 | `INVALID_ARGUMENTS` |
+| 绝对路径，包括 Windows 盘符形式 | `PATH_OUTSIDE_WORKSPACE` |
+| `../` 等规范化后越出根目录的路径 | `PATH_OUTSIDE_WORKSPACE` |
+| 反向范围或超过总行数 | `INVALID_ARGUMENTS` |
+| 白名单只允许 search，却调用 read | `TOOL_NOT_ALLOWED` |
+| 库内符号链接指向库外文件或目录 | 建立快照时跳过，搜索无结果，读取为错误；不读取目标内容 |
+| `ToolContext.workspaceRoot` 指向其他目录 | 不影响知识库根目录，不能借此换根 |
+
+测试使用临时目录创建真实库外秘密文件、真实文件符号链接和真实目录符号链接，断言搜索、读取及错误输出均不包含秘密内容。Demo 与测试不读取或提交任何真实凭证。
+
+这是一层小型只读接入边界，不宣称是完整对抗性沙箱。例如，索引期间的并发文件替换、超大文件、资源配额和更完整的文件系统隔离留给后续工作，不在 D041 扩张实现。
+
+---
+
+## 9. 真实 AgentLoop Demo
+
+### 9.1 运行
 
 ```bash
+npm run demo:d041
+```
+
+要求 Node 24；本日实际环境为 Node `v24.19.0`。Demo 不请求网络，不需要 API Key。
+
+### 9.2 Demo 如何证明没有绕过 Loop
+
+1. 在系统临时目录创建 `mkdtemp` 工作区，写入 `overview.md` 和 `operations/release.md`。它们是明确构造的教学资料，不冒充真实第三方知识库。
+2. 通过 `createKnowledgeTools(workspace)` 读取真实文件并注册两个工具。
+3. 第 1 次确定性模型响应只发出 search 调用。
+4. Loop 执行工具后，把真实 JSON 结果作为 `tool` 消息加入历史。
+5. 第 2 次模型响应从消息历史中查找 `d041-search` 对应的真实工具消息，解析首个结果的 `path` 和 `line`，用它构造 read 参数。测试逐项比较 read 参数与 search 结果，证明数据依赖。
+6. Loop 再次执行工具并回喂真实 read 消息。
+7. 第 3 次模型响应从 read 消息中的 `lines[0].text` 生成回答，并使用真实路径/行号作为来源。
+8. Demo 断言工具顺序、无工具错误、3 turns、`completed`、引用和清理状态后才输出 PASS。
+9. `finally` 中递归删除临时目录；入口脚本捕获异常、输出堆栈并设置 `process.exitCode = 1`。
+
+### 9.3 本轮真实观察
+
+```text
+[01] knowledge_search
+  参数：{"query":"发布窗口"}
+  结果：operations/release.md，第 3 行，score=1
+[02] knowledge_read
+  参数：{"path":"operations/release.md","startLine":3,"endLine":3}
+来源：operations/release.md:3 发布窗口为每周二 14:00，发布前必须完成全量测试。
+最终回答：发布窗口为每周二 14:00，发布前必须完成全量测试。（来源：operations/release.md:3）
+stopReason=completed turns=3
+workspaceRemoved=true
+D041 Demo PASS
+```
+
+完整、未改写的本轮终端输出保存在 [`evidence/d041-transcript.txt`](./evidence/d041-transcript.txt)。可用以下命令重新生成：
+
+```bash
+set -o pipefail
+npm run demo:d041 2>&1 | tee evidence/d041-transcript.txt
+```
+
+---
+
+## 10. TDD：先 RED，再 GREEN
+
+本日严格先写行为测试，再写生产实现。
+
+### 10.1 RED：功能尚不存在
+
+先新增：
+
+- `test/d041-knowledge.test.ts`
+- `test/d041-demo.test.ts`
+
+随后实际运行：
+
+```bash
+npx vitest run test/d041-knowledge.test.ts test/d041-demo.test.ts
+```
+
+实际结果：退出码 `1`，`Test Files 2 failed (2)`。两个套件分别明确报告：
+
+```text
+Failed to resolve import "../src/tools/knowledge.ts"
+Failed to resolve import "../src/demo/d041.ts"
+```
+
+此时 `src/tools/knowledge.ts` 与 `src/demo/d041.ts` 尚未创建，失败原因正是新行为没有实现，而不是断言写错或测试碰巧通过。
+
+### 10.2 GREEN：最小实现后复跑同一命令
+
+实现快照、两个工具、Demo、导出和 npm script 后，原样复跑：
+
+```text
+Test Files  2 passed (2)
+Tests       9 passed (9)
+```
+
+其中知识库行为 8 项，真实 AgentLoop Demo 1 项。随后 ESLint 与 `tsc --noEmit` 也通过。
+
+### 10.3 测试关注行为，不只测 mock
+
+- 搜索测试在临时目录写真实 Markdown，验证大小写不敏感命中、行内重复次数、路径/行号排序及精确片段。
+- 读取测试验证一基闭区间、全文行数和带行号原文。
+- 错误测试覆盖空查询、无结果、未知文件、非 Markdown、绝对路径、两种穿越路径、反向/越界/零行号。
+- 符号链接测试创建真实库外文件和目录链接，验证秘密内容不会进入任何结果。
+- 白名单测试通过真实 Registry 证明 read 会被 `TOOL_NOT_ALLOWED` 拒绝。
+- 快照测试修改真实磁盘文件，证明旧快照不变、显式重建后更新。
+- Demo 测试运行真实 Loop，比较 search 的真实结果与 read 的真实参数，并验证最终引用和清理。
+
+---
+
+## 11. 验证命令与真实数字
+
+```bash
+npm run demo:d041
+npm run check
+npm run test:coverage
 git diff --check
 ```
 
-结果：**通过，退出码 0，无 whitespace 错误**。
+本轮实际结果：
 
-相对链接检查覆盖 `README.md` 和四个 D040 文档，跳过 HTTPS 外部链接，逐一解析本地路径和可选锚点。结果：**5 个文件、32 条相对链接、0 个错误**。
+| 检查 | 结果 |
+|---|---|
+| `npm run demo:d041` | PASS；search → read → 带来源回答；3 turns；临时目录已删除 |
+| `npm run check` | PASS；ESLint、`tsc --noEmit`、Vitest 全部通过 |
+| 全量 Vitest | **47 个测试文件，406 项测试全部通过** |
+| `npm run test:coverage` | PASS，同样是 **47 文件 / 406 测试** |
+| Statements | **91.69%** |
+| Branches | **86.95%** |
+| Functions | **98.12%** |
+| Lines | **93.50%** |
+| `src/tools/knowledge.ts` | Statements **93.13%**，Branches **81.57%**，Functions **100%**，Lines **93.54%** |
+| `git diff --check` | 通过，无空白错误 |
+| 新增运行时依赖 | **0**；`package-lock.json` 无需变化 |
 
-### 8.3 全量检查
+`npm run check` 包含完整旧测试，因此 D001～D040 的既有行为也一起回归，而不是只运行本日 9 项测试。
 
-实际执行：
+---
 
-```bash
-npm run check
-```
+## 12. 已知限制与后续边界
 
-结果：**ESLint 与 TypeScript 类型检查通过；45/45 个测试文件、397/397 项测试通过，退出码 0**。该命令依次运行 ESLint、TypeScript `tsc --noEmit` 和 Vitest 全量测试。
+1. **词法检索限制**：只支持连续子串，不理解语义；查询写法不同可能无结果。
+2. **固定快照**：没有 watch、增量索引或自动刷新；知识库变更后必须重建两个工具。
+3. **同步全量读取**：工厂创建时同步遍历并读取全部 `.md`，适合小型教学知识库，不适合海量语料或严格低延迟启动。
+4. **结果未分页**：当前搜索返回全部命中行，没有 `limit`、游标、文件大小上限、超时或内存配额。
+5. **片段较短**：只返回命中行，最多 160 字符；需要上下文时再用 read 指定行范围。
+6. **扩展名有限**：只索引普通 `.md` 文件，不处理 `.markdown`、Frontmatter 结构化字段或附件。
+7. **符号链接一律跳过**：即使链接目标仍在库内也不跟随，以换取简单、稳定的边界。
+8. **不是完整沙箱**：没有实现 D043 的完整资源治理与对抗性文件系统隔离。
+9. **没有新增 MCP Server**：本日演示内置工具接入，不复述或替代 D035～D039 的 MCP 流程。
+10. **没有动态工具检索**：工具仍由现有 Registry 全量注册和暴露，不提前实现 D048。
 
-### 8.4 覆盖率
-
-实际执行：
-
-```bash
-npm run test:coverage
-```
-
-结果：**45/45 个测试文件、397/397 项测试通过，退出码 0**。
-
-| 指标 | 本轮实测 | 配置门槛 |
-| --- | ---: | ---: |
-| Statements | 91.66% | 80% |
-| Branches | 87.45% | 75% |
-| Functions | 97.95% | 80% |
-| Lines | 93.29% | 80% |
-
-本日没有修改运行时代码，因此覆盖率变化只应视为本轮真实回归结果，不宣称为课程文档带来的代码质量提升。
-
-## 9. 已知限制
-
-- 本课程材料完整可讲授，但本轮没有实际授课、真实回放或学员反馈；教学效果尚未经过现场验证。
-- 所有行业资料核查固定在 2026-11-12；后续版本、治理和厂商文档可能变化，复讲前必须重查。
-- 一个 OpenAI 文档页面对本轮 curl 返回 403，已在来源表标记；没有把它写成全部 URL 均成功。
-- 课程只做 A2A 边界比较，不提供 A2A 实现教程或完整协议评测。
-- 本仓库证据只覆盖 macOS + Node 24 环境下的既有测试及 `2025-11-25 + stdio + tools` 子集，不证明所有第三方实现或所有平台互通。
-- 课程中的安全清单是威胁建模起点，不能替代具体系统的身份、租户、合规、供应链和业务风险评审。
-- 决策清单用于工程架构评估，不是市场预测、采购承诺或绝对投资建议。
+这些限制是本日范围的明确边界，而不是把未完成能力伪装成已经交付。D041 到此完成，不包含 D042 的实现。
