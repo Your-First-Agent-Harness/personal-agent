@@ -1,189 +1,210 @@
-# D021 · Session 存储：SQLite、JSON 序列化、快照
+# D022｜2026-12-02｜进程崩溃恢复：Session 恢复 + 中断任务识别
 
-> 目标：在不改变现有内存 `Session`、Loop 和 CLI 契约的前提下，提供可关闭、重开并恢复完整消息历史的 SQLite 存储。
+> 基线：D021 `384c927`（完整 Session SQLite 快照）；保留 D020 streaming、原有一次性 CLI/REPL 行为与旧 Session API。
 >
-> 基线：D020 提交 `6bc5d1b`。本日验证环境：Node.js `v24.19.0`、原生 TypeScript、ESM、Vitest，零新增运行时依赖。
+> 本日交付真实 Run 状态持久化、连接真实 `runAgentLoop` 的薄 service，以及两个独立 Node 进程之间的 SIGKILL 崩溃恢复验证。
+>
+> 环境：Node.js ≥24（`node:sqlite` 内置）；零运行时依赖。
 
-## 一、公开契约
+---
 
-实现位于 `src/memory/session-store.ts`：
+## 一、交付内容
+
+| 模块 | 职责 |
+| --- | --- |
+| `src/memory/run-store.ts` | RunRecord 模型、SqliteRunStore、运行状态机与启动中断识别 |
+| `src/runtime/persistent-runner.ts` | 连接 SessionStore、RunStore 与真实 runAgentLoop |
+| `test/d022-run-store.test.ts` | 状态持久化、终态隔离、session 隔离与关闭语义 |
+| `test/d022-persistent-runner.test.ts` | 完整历史保存、失败原样抛出、恢复与 StopReason |
+| `test/d022-crash-recovery.test.ts` | 真实独立进程 SIGKILL 集成测试 |
+| `test/d022-process.ts` | 崩溃/恢复子进程夹具，不使用直接 fail/mark 冒充崩溃 |
+
+本日不接入 CLI，不改 Provider、工具执行器、Loop 或旧 Session API。
+
+---
+
+## 二、RunRecord 与 RunStore API
 
 ```ts
-export interface SessionStore {
-  save(session: Session): void;
-  load(id: string): Session | undefined;
+type RunStatus = 'running' | 'completed' | 'interrupted' | 'failed';
+
+interface RunRecord {
+  readonly id: string;
+  readonly sessionId: string;
+  readonly status: RunStatus;
+  readonly stopReason?: StopReason;
+  readonly startedAt: string; // ISO 时间
+  readonly updatedAt: string; // ISO 时间
+}
+
+interface RunStore {
+  start(run: { id?: string; sessionId: string }): RunRecord;
+  finish(id: string, stopReason?: StopReason): RunRecord;
+  fail(id: string): RunRecord;
+  get(id: string): RunRecord | undefined;
+  list(sessionId?: string): RunRecord[];
+  interruptRunning(): RunRecord[];
   close(): void;
 }
 ```
 
-`SqliteSessionStore` 是同步实现，`SessionStoreError` 用于损坏消息数据和关闭后误用等明确的存储错误。现有 `src/memory/session.ts` 未修改：
+- `start`：未传 id 时使用 `randomUUID()`，立即持久化 `running`。
+- `finish`：只允许 `running → completed`，默认 StopReason 为 `completed`，也保留 `max_turns`、`cancelled`、`tool_errors`。
+- `fail`：只允许 `running → failed`。
+- `get/list`：读取持久化记录；`list(sessionId)` 只返回该 Session 的运行。
+- `interruptRunning`：事务内找出并更新全部遗留 `running → interrupted`，只返回本次被中断的记录。
+- `close`：幂等；关闭后的所有操作抛出 `RunStoreError`。
+- 所有 id、session id、状态值与时间写入均使用参数化 SQL；表结构由 store 自动创建。
 
-- `Session.append()` 仍只修改内存历史；
-- `snapshot()` 仍返回隔离副本；
-- Loop、CLI 和 D020 流式路径不需要依赖存储层；
-- 调用方决定何时 `save()`，以及何时用 `load(id)` 创建恢复后的内存 `Session`。
+SQLite 表：`runs(id, session_id, status, stop_reason, started_at, updated_at)`。RunStore 可独立打开数据库，也可与 SessionStore 打开同一个文件。
 
-基本用法：
+---
+
+## 三、状态机
+
+```text
+start()
+   │
+   ▼
+running ─── finish(stopReason) ───▶ completed
+   │
+   ├────── fail() ────────────────▶ failed
+   │
+   └─ 新进程启动 interruptRunning() ▶ interrupted
+
+completed / failed / interrupted 均为终态，不会被后续启动恢复改写。
+```
+
+`completed` 表示 Loop 正常返回，不等同于模型一定回答成功。例如协作式取消仍由 Loop 正常返回，因此记录为 `completed + stopReason=cancelled`。Provider 异常则进入 `failed`。进程被强制杀死时没有执行任何终态写入，所以先保留 `running`，在下一个进程启动时才识别为 `interrupted`。
+
+---
+
+## 四、PersistentAgentService
 
 ```ts
-import { Session } from './src/memory/session.ts';
-import { SqliteSessionStore } from './src/memory/session-store.ts';
+const sessionStore = new SqliteSessionStore(path);
+const runStore = new SqliteRunStore(path);
+const service = new PersistentAgentService({ sessionStore, runStore });
 
-const session = new Session('demo', [{ role: 'user', content: '你好\nSQLite' }]);
-const store = new SqliteSessionStore('./sessions.sqlite');
-store.save(session);
-store.close();
+const result = await service.run({
+  runId: 'run-1',             // 可选
+  sessionId: 'session-1',
+  userMessage: '修复这个问题',
+  provider,
+  registry,
+  maxTurns: 4,
+  maxTokens: 1024,
+  workspaceRoot: root,
+  streaming: true,           // D020 选项原样传给真实 Loop
+  onToken,
+});
 
-const reopened = new SqliteSessionStore('./sessions.sqlite');
-const restored = reopened.load('demo');
-console.log(restored?.snapshot());
-reopened.close();
+const recovered = service.recover('session-1');
+// recovered: { session: Session, interruptedRuns: RunRecord[] } | undefined
 ```
 
-数据库文件的父目录必须已经存在。`load()` 找不到 id 时返回 `undefined`。`close()` 可重复调用；关闭后再调用 `save()` 或 `load()` 会抛出 `SessionStoreError`。
+### 正常执行时序
 
-## 二、SQLite schema
+1. 按 `sessionId` 加载已有 Session；不存在则创建同 id 的新 Session。
+2. 追加当前用户消息，并在调用 Provider 前 `SessionStore.save()`。
+3. 创建并持久化 `running` RunRecord。
+4. 将完整消息快照交给真实 `runAgentLoop`；provider、registry、streaming、signal 等选项继续走原 Loop。
+5. Loop 正常返回后，只把本轮新增后缀追加到 Session，再保存完整快照。
+6. 写入 `completed` 与实际 StopReason，返回 `{ ...AgentLoopResult, run, session }`。
 
-构造存储时启用外键，并幂等创建以下两张表：
+### Provider 失败与进程崩溃
 
-```sql
-PRAGMA foreign_keys = ON;
+- Provider 抛错：写 `failed`，然后原样抛出同一个错误，不包装、不伪装完成。
+- SIGKILL/进程崩溃：没有 catch/finally 伪造成功；磁盘上仍是最后提交的 `running` 与已保存 Session。
+- 新 service 启动：构造时调用 `interruptRunning()`；`recover(sessionId)` 加载完整 Session，并返回该 Session 的 interrupted runs。
+- `recover` 不执行 Provider、不调用工具、不自动 replay。
 
-CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY
-);
+---
 
-CREATE TABLE IF NOT EXISTS session_messages (
-  session_id TEXT NOT NULL,
-  position INTEGER NOT NULL,
-  message_json TEXT NOT NULL,
-  PRIMARY KEY (session_id, position),
-  FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-);
-```
+## 五、真实 SIGKILL 验证
 
-- `sessions.id` 是 Session 的稳定身份；
-- `session_messages.position` 是消息在快照中的数组下标，恢复时使用 `ORDER BY position ASC`；
-- `(session_id, position)` 主键防止同一 Session 的同一位置出现两行；
-- 外键保证消息必须属于一个 Session，删除父记录时可级联清理；
-- 所有 id、序号和 JSON 文本都通过 `?` 参数绑定，不把外部值拼入 SQL。
+`test/d022-crash-recovery.test.ts` 不是直接调用 `fail()` 或 `interruptRunning()` 模拟崩溃，而是：
 
-## 三、JSON 序列化边界
+1. 使用 `process.execPath` 启动第一个独立 Node 子进程，数据库位于临时目录。
+2. 子进程创建真实 SqliteSessionStore、SqliteRunStore、PersistentAgentService，并运行真实 `runAgentLoop`。
+3. 用户消息与 running 记录落盘后，Provider 输出 `ready`，随后返回永不完成的 Promise，Loop 真实阻塞在 Provider。
+4. 父进程收到 ready 后发送 `SIGKILL`，并验证子进程退出信号确为 `SIGKILL`。
+5. 启动第二个独立 Node 子进程，用新的 store/service 实例重新打开同一个 SQLite 文件。
+6. 第二进程恢复出同一 `crash-run`，状态为 `interrupted`；Session id 为 `crash-session`，历史完整保留 `崩溃前必须落盘`。
+7. 子进程夹具路径由 `import.meta.url` 解析，运行 cwd 是另一临时目录，不依赖仓库 cwd。
+8. ready 等待有 8 秒超时，测试总超时 15 秒；`afterEach` 对仍存活的子进程补发 SIGKILL、等待退出并删除临时目录，避免 zombie 和挂住。
 
-一次 `save(session)` 首先取得 `session.snapshot()`，再把每条消息分别用 `JSON.stringify()` 写入 `message_json`。序列化的是消息快照，不是 `Session` 实例，也不保存任何运行时 Provider、工具注册表或流式回调。
+单测另外验证：completed/failed 不会被启动恢复误标、session 记录隔离、completed 重开数据库仍为终态、失败保留同一错误对象、取消保留 StopReason。
 
-保留的 `Message` 字段为：
+---
 
-- `role`、`content`；
-- 可选 `toolCalls`，其中每次调用的 `id`、`name`、`arguments` 都按字符串保存；
-- 可选 `toolCallId`、`name`。
-
-`toolCalls.arguments` 不在存储层解析成对象再重建，因此其原始 JSON 字符串保持不变。`content` 和工具结果中的换行、Unicode、空字符串由 JSON 和 SQLite TEXT 完整保留。
-
-`load(id)` 读取有序行后，将 JSON 解析结果先当作 `unknown` 处理，再逐字段验证并构造新的 `Message`：
-
-- role 必须是 `system`、`user`、`assistant` 或 `tool`；
-- content 必须是字符串；
-- toolCalls 及其 id/name/arguments 必须符合现有领域契约；
-- 可选字段出现时必须是字符串；
-- 非法 JSON、非字符串持久化内容或不符合契约的结构都会抛出带 Session id 和消息位置的 `SessionStoreError`，不会把任意 JSON 直接断言成 `Message`。
-
-验证后通过 `new Session(id, messages)` 恢复，因此原 Session 与恢复 Session 的 id、snapshot 一致，并继续具备原有快照隔离。修改恢复对象的快照或只修改其内存历史，不会反向改变数据库；再次 `load()` 仍读取最后一次成功保存的快照。
-
-## 四、事务与重复保存
-
-每次保存使用一个显式事务：
-
-```text
-BEGIN IMMEDIATE
-  插入 sessions 父记录（id 已存在则保持不变）
-  删除该 id 的旧 session_messages
-  按 position 插入本次完整消息快照
-COMMIT
-```
-
-任一步骤失败会执行 `ROLLBACK` 并重新抛出错误。这样，其他数据库连接不会看到一次保存中“旧消息已删、新消息尚未写全”的中间状态。
-
-重复保存相同 id 的语义是**替换为最新完整快照**，不是增量追加：消息新增后保存不会留下旧副本，使用同 id 的较短快照保存也不会残留更长历史。
-
-本日的事务保证针对一次数据库快照写入；它不意味着进程中断识别、Run 续跑或工具副作用恢复已经实现。
-
-## 五、测试策略与 RED → GREEN 证据
-
-`test/d021-session-store.test.ts` 使用系统临时目录中的真实 SQLite 文件，没有 mock `node:sqlite`。9 项测试覆盖：
-
-1. 关闭并重开数据库后恢复三轮有序 user/assistant 历史，以及换行、Unicode、空字符串；
-2. 工具调用与工具结果恢复，保留调用 id/name/arguments；
-3. 同 id 重复保存替换完整快照，不重复追加；
-4. 两个 Session 的历史隔离；
-5. 不存在的 id 返回 `undefined`；
-6. 外部修改恢复快照或内存 Session 后，再次读取不受污染；
-7. 非法 JSON 抛出明确 `SessionStoreError`；
-8. JSON 结构不符合 Message 契约时抛出明确 `SessionStoreError`；
-9. close 幂等，以及关闭后的 save/load 错误行为。
-
-严格按照测试先行执行：
-
-```text
-RED：npm test -- test/d021-session-store.test.ts
-     1 个文件、9 项测试全部失败
-     原因：src/memory/session-store.ts 尚不存在
-
-GREEN：完成最小实现后再次执行同一命令
-       1 个文件、9 项测试全部通过
-```
-
-随后联合运行旧 Session 与 D020 流式测试，共 5 个文件、26 项测试全部通过，确认既有快照边界和流式能力未受影响。
-
-## 六、运行与实测结果
-
-只跑本日测试：
+## 六、运行方式
 
 ```bash
-npm test -- test/d021-session-store.test.ts
-```
+npm ci
 
-运行本日及相关回归：
+# 本日三组针对性测试：11 项
+npm test -- test/d022-run-store.test.ts \
+  test/d022-persistent-runner.test.ts \
+  test/d022-crash-recovery.test.ts
 
-```bash
-npm test -- \
-  test/session.test.ts \
+# 连同 D021 Session 与 D020 streaming 回归
+npm test -- test/d022-run-store.test.ts \
+  test/d022-persistent-runner.test.ts \
+  test/d022-crash-recovery.test.ts \
   test/d021-session-store.test.ts \
-  test/d020-streaming.test.ts \
   test/d020-loop-streaming.test.ts \
+  test/d020-streaming.test.ts \
   test/d020-cli.test.ts
-```
 
-完整验证：
-
-```bash
+# 完整静态检查与测试
 npm run check
 npm run test:coverage
 ```
 
-在 Node.js `v24.19.0` 下的最终实测：
+---
 
-| 项目 | 结果 |
+## 七、TDD 与验证证据
+
+### RED（实现前实际运行）
+
+| 测试 | 失败证据 |
 | --- | --- |
-| ESLint | 通过 |
-| TypeScript `tsc --noEmit` | 通过 |
-| 全量 Vitest | **23 个测试文件、197 项测试全部通过** |
-| 覆盖率运行 | **23 / 23 文件、197 / 197 测试通过** |
-| Statements | **94.52%** |
-| Branches | **89.49%** |
-| Functions | **98.47%** |
-| Lines | **95.36%** |
+| `d022-run-store` | 6 项失败：动态导入找不到 `src/memory/run-store.ts` |
+| `d022-persistent-runner` | RunStore 转绿后重跑，4 项失败：找不到 `src/runtime/persistent-runner.ts` |
+| `d022-crash-recovery` | 第一子进程在 ready 前退出，stderr 明确为找不到 `persistent-runner.ts`；父进程同时完成清理 |
 
-覆盖率阈值仍为 statements/lines/functions 80、branches 75，结果全部高于阈值。本次未增加 `better-sqlite3`、`sqlite3` 或任何其他运行时依赖，直接使用 Node 内置 `node:sqlite` 的 `DatabaseSync`。
+### GREEN（最终）
 
-本机上述测试、完整检查和覆盖率输出中均**未出现 `node:sqlite` ExperimentalWarning**。命令行仍会显示环境已有的 npm `Unknown user config "home"` 提示，该提示与 SQLite 和本日功能无关。
+- D022 针对性：3 文件，11/11 通过。
+- D022 + D021 + D020 回归：7 文件，33/33 通过。
+- `npm run check`：ESLint、`tsc --noEmit`、全量测试均通过。
+- 全量：26 文件，208/208 通过（基线 197 + 本日 11）。
 
-## 七、明确限制与后续边界
+覆盖率（最终 `npm run test:coverage`）：
 
-本日只交付显式的 Session 保存与恢复能力，没有向 CLI 添加半套自动恢复逻辑：
+| 范围 | Statements | Branches | Functions | Lines |
+| --- | ---: | ---: | ---: | ---: |
+| 全局 | 94.38% | 89.34% | 98.67% | 95.13% |
+| `run-store.ts` | 90.19% | 85.71% | 100% | 90% |
+| `persistent-runner.ts` | 100% | 100% | 100% | 100% |
+| D021 `session-store.ts` | 88.46% | 90% | 100% | 88.46% |
 
-- **D022**：Run journal、进程中断识别、崩溃扫描和自动续跑不在本日范围内；SQLite 中仍存在某个 Session 不等于系统知道它中断前执行到哪一步。
-- **D023**：工具幂等 key、副作用去重和 exactly-once 语义不在本日范围内；恢复消息历史不会自动判断某个工具是否已经产生外部副作用。
-- 当前没有 schema 版本迁移机制，也未宣称完成多进程并发写入或跨进程崩溃恢复验证。
-- `save()` 只持久化调用时的快照；之后新增到内存 Session 的消息需要再次显式保存。
-- D020 的 Provider 流式读取、Loop delta 事件和 CLI 输出路径未改动；本日测试不包含真实模型服务调用。
+首次 coverage 曾触发旧 `run_command` 50ms 超时测试的 PID 临时文件竞态；该旧测试针对性复验通过，随后完整 coverage 重跑 208/208 通过。本日未修改旧 `run_command` 文件。
+
+---
+
+## 八、恢复边界（必须明确）
+
+1. **不承诺 exactly-once。** 崩溃可能发生在工具副作用之后、最终 Session 保存之前；仅凭最后快照无法推断所有外部副作用是否发生。
+2. **不自动重放工具。** 本日只恢复完整 Session 和 interrupted 记录，把是否继续、如何核对副作用交给调用方。
+3. **恢复到最后已提交快照。** 用户消息在运行前保存，正常结束保存完整新增历史；崩溃时尚未保存的 Provider token、工具结果或内存消息无法凭空恢复。
+4. **单进程重启恢复协议。** 遗留 running 标记不等于多进程 leader election、heartbeat 或活跃实例检测。不要让多个活跃 service 同时操作同一数据库；新 service 启动会中断当时所有 running 记录。
+5. **interrupted 与 failed 不同。** failed 是 Provider 已明确抛错；interrupted 是新进程发现旧进程留下的 running，不能据此推断具体崩溃原因。
+6. **D020 与 CLI 不变。** streaming 选项可穿透 service；原有一次性 CLI/REPL 未接入持久化，不改变既有行为。
+
+---
+
+## 九、D023 入口
+
+D023 可在本日 RunRecord 与恢复点上继续设计：幂等 key、工具结果缓存、明确的 replay 策略、外部副作用对账与人工确认流程。上述能力本日均未提前实现；在完成这些语义前，不应把 interrupted run 直接自动重放为“安全续跑”。
