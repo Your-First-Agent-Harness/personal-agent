@@ -1,267 +1,225 @@
-# personal-agent
+# Personal Agent · 第 36 天
 
-> 进度：**D035 / D100 · v0.1.0**
-> 当日目标：实现 MCP 2025-11-25 / stdio Client 的连接、列工具、调用与错误处理，并真实连接一个独立外部 MCP Server。
-> 本日只做 D035，**不实现 D036 Server，不修改 main 索引**。
+> 进度：D036 / D100 · v0.1.0
+>
+> 主题：MCP Server 实现「把自有工具暴露出去」——自己的 Server 可被别的客户端调用
+>
+> 今日交付：Node 24 原生 TypeScript ESM、零新增运行时依赖的手写 JSON-RPC 2.0 ndjson stdio Server；复用真实 ToolRegistry；安全临时工作区示例；单元/跨进程测试；官方 Inspector 独立客户端 transcript。
 
-## 今日交付
+## 先跑起来
 
-| 交付物                                                                     | 内容                                                       |
-| -------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| [`src/adapters/mcp-stdio-client.ts`](./src/adapters/mcp-stdio-client.ts)   | 零新增运行时依赖的 Node.js stdio MCP Client                |
-| [`test/d035-mcp-client.test.ts`](./test/d035-mcp-client.test.ts)           | 初始化、并发、分页、错误、取消、退出和清理测试             |
-| [`test/fixtures/mcp-stdio-server.ts`](./test/fixtures/mcp-stdio-server.ts) | 确定性的本地单测 fixture；**不是外部 Server 证据**         |
-| [`scripts/d035-external.ts`](./scripts/d035-external.ts)                   | 通过 `npx` 启动官方外部 Server，执行真实握手、列工具和调用 |
-| [`docs/d035-external-transcript.txt`](./docs/d035-external-transcript.txt) | 实际终端命令与输出，未把 fixture 冒充外部服务              |
-| [`docs/d034-mcp-protocol.md`](./docs/d034-mcp-protocol.md)                 | D034 协议笔记，本实现以其第 9 节最小契约为边界             |
-
-## 1. 版本与范围
-
-- 协议固定为 **MCP `2025-11-25`**，基础消息为 **JSON-RPC 2.0**。
-- 传输只有 **stdio 换行分帧**；操作只有 `initialize`、`tools/list`、`tools/call` 与关闭。
-- 不声明支持 `2026-07-28`，不实现 HTTP、SSE、Batch、Server、Resources、Prompts、Tasks、OAuth 或自动重连。
-- 使用 Node.js 24 原生 TypeScript ESM 与 `node:child_process`，**没有把 MCP SDK 添加为项目依赖**。
-- 保留 MCP Tool Schema 和工具结果，不强行改写成本项目 `Tool.execute(): Promise<string>`；main Loop/Registry 索引未改。
-
-## 2. 快速运行
+环境：Node 24、npm。项目运行时依赖仍为零。
 
 ```bash
-# 确定性单测：不访问网络，不启动外部 npm 包
-npx vitest run test/d035-mcp-client.test.ts
-
-# 真实外部互操作：npx 缓存未命中时需要网络
-npm run demo:d035
-
-# 完整质量检查
+npm install
 npm run check
 npm run test:coverage
 ```
 
-`demo:d035` 在内部启动的独立进程等价于：
+启动安全示例 Server（stdout 只用于 MCP 消息，日志只写 stderr）：
 
 ```bash
-npx --yes @modelcontextprotocol/server-everything@2025.11.25 stdio
+npm run mcp:server
 ```
 
-直接执行上面这条命令只会启动并等待 stdio 输入；要完成握手与调用，应运行 `npm run demo:d035`。
+该命令等待 stdio 客户端，不是一个会自行打印 Demo 结果然后退出的命令。用下面的官方 CLI 连接它，即可完成可复现演示。
 
-## 3. stdio 帧：每行恰好一个 JSON 消息
+## 独立官方客户端验收
 
-Client 向子进程 `stdin` 写入一条 JSON 和 `\n`，从 `stdout` 按换行组帧。 stdout 只允许协议消息；诊断日志单独进入 `stderr`，默认只保留最后 **65,536 字符**，可用 `maxStderrChars` 调整。
+实际使用：**`@modelcontextprotocol/inspector@2.15.0`**，通过 `npx` 临时执行，没有加入 `dependencies`、`devDependencies` 或 lockfile。原始输出、包版本、Node/npm 版本和退出码见：
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "initialize",
-  "params": {
-    "protocolVersion": "2025-11-25",
-    "capabilities": {},
-    "clientInfo": { "name": "personal-agent", "version": "0.1.0" }
-  }
-}
+- `docs/d036-inspector-transcript.txt`
+
+在仓库根目录逐条复现：
+
+```bash
+# initialize：确认协议版本、serverInfo、capabilities
+npx --yes @modelcontextprotocol/inspector@2.15.0 \
+  --cli --transport stdio --format json --method initialize \
+  -- node src/demo/d036-mcp-server.ts
+
+# tools/list：官方 Client 发现两个自有工具
+npx --yes @modelcontextprotocol/inspector@2.15.0 \
+  --cli --transport stdio --format json --method tools/list \
+  -- node src/demo/d036-mcp-server.ts
+
+# tools/call：通过真实 Registry/read_file 读取临时工作区文件
+npx --yes @modelcontextprotocol/inspector@2.15.0 \
+  --cli --transport stdio --format json --method tools/call \
+  --tool-name read_file --tool-args-json '{"path":"README.txt"}' \
+  -- node src/demo/d036-mcp-server.ts
 ```
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "protocolVersion": "2025-11-25",
-    "capabilities": { "tools": { "listChanged": true } },
-    "serverInfo": { "name": "example", "version": "1.0.0" }
-  }
-}
-```
+真实结果摘要：
 
-```json
-{ "jsonrpc": "2.0", "method": "notifications/initialized" }
-```
+- `initialize` 返回 `protocolVersion: "2025-11-25"`、`serverInfo.name: "personal-agent-safe-demo"` 与 `capabilities.tools`。
+- `tools/list` 返回 `read_file`、`list_dir`，保留 Registry 中的描述和 JSON Schema。
+- `tools/call read_file {"path":"README.txt"}` 返回临时工作区的真实文本，`isError: false`。
+- 三次 CLI 退出码均为 0；每次 CLI 都启动一个全新的 Server 子进程并自行完成握手，所以 transcript 中临时目录随机后缀不同。
 
-随后才能发送操作：
+`test/d036-stdio-integration.test.ts` 还用 D035 的 `StdioMcpClient` 做互通回归，但**自有 Client 不被当作独立客户端证据**；独立证据只认上面的官方 Inspector 实际执行。
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 2,
-  "method": "tools/call",
-  "params": { "name": "echo", "arguments": { "message": "hello" } }
-}
-```
+## 代码入口
 
-实现不会把 stderr 文本拼进 JSON 解析器，也不会给 Notification 回复 Response。
+- `src/adapters/mcp-stdio-server.ts`：stdio Server、生命周期、JSON-RPC、Registry 适配、并发/取消/关闭。
+- `src/demo/d036-mcp-server.ts`：临时工作区和明确双工具白名单示例。
+- `test/d036-mcp-server.test.ts`：协议、错误、真实 Registry、并发、取消和关闭测试。
+- `test/d036-stdio-integration.test.ts`：真实子进程互通，读取文件并验证文件错误和路径边界。
+- `docs/d036-inspector-transcript.txt`：官方独立客户端真实证据。
 
-## 4. 生命周期
+## Server 生命周期
 
 ```text
-spawn(command, args, { stdio: pipes, env })
-  → initialize(protocolVersion / capabilities / clientInfo)
-  → 校验 result、必要字段与精确的 2025-11-25 版本
-  → notifications/initialized
-  → ready：tools/list、tools/call，可并发
-  → close：stdin.end()
-  → 等待子进程 exit；超时先 SIGTERM，再 SIGKILL
-  → 清理 stdout/stderr/process 监听器与 pending 状态
+Client                         Server
+  | initialize(request)          |
+  |----------------------------->| 校验 params，协商版本
+  | initialize(result)           |
+  |<-----------------------------| 只声明本日支持的 2025-11-25
+  | notifications/initialized    |
+  |----------------------------->| 进入 ready；通知不回复
+  | ping / tools/list/call       |
+  |<============================>| 业务请求可并发完成
+  | notifications/cancelled      |
+  |----------------------------->| 真实 AbortSignal；通知不回复
+  | 关闭 stdin                   |
+  |----------------------------->| abort 在途调用、清理、停止写响应
 ```
 
-关键约束：
+规则：
 
-1. `connect()` 每个实例只执行一次；版本不符或初始化结果缺字段时不会发送 `initialized`。
-2. `capabilities: {}` 是 Client 不声明反向能力；Server 未声明 `capabilities.tools` 时，列工具和调用均在本地以 `CAPABILITY_MISSING` 拒绝。
-3. 关闭没有 MCP `shutdown` RPC；stdio 生命周期就是关闭通道和进程。
-4. `close()` 可重复、可并发调用，共用同一个关闭 Promise。
-5. 子进程提前退出、stdin 不可写、畸形帧和未知响应 id 都会明确结束相关 Promise，不留静默 pending。
+1. `initialize` 要求字符串 `protocolVersion`、对象 `capabilities`，以及含字符串 `name/version` 的 `clientInfo`。
+2. 客户端版本正好是 `2025-11-25` 时回显该版本；其他字符串版本仍返回 Server 支持的 `2025-11-25`，由 Client 决定是否继续。本日不实现 `2026-07-28`。
+3. `ping` 在初始化前也可用；`tools/*` 必须等 `notifications/initialized`，否则返回 `-32000 Server not initialized`。
+4. 重复 `initialize` 返回 `-32600`。未知方法返回 `-32601`。
+5. MCP stdio 没有另造 `shutdown/exit` RPC；本实现按 D034 的真实边界以 stdio 关闭作为关闭信号。
+6. 所有通知都不回复，包括未知通知、未知取消 id、初始化完成通知。收到没有对应 Server 请求的 JSON-RPC response（未知 id）也只忽略，不再生成第二个响应。
 
-## 5. API
+### ndjson 与日志
+
+- 每条消息恰好一行；使用 `JSON.stringify(message) + "\n"` 写出，不使用 Content-Length 或字符串拼接构造 JSON。
+- 使用 readline 分帧，支持 CRLF、跨 chunk 消息和多消息连续到达。
+- 畸形 JSON 返回 `id:null`、`code:-32700`，诊断写 `errorOutput`；示例把它接到 `process.stderr`。
+- stdout 只写协议帧。启动、临时目录、停止日志全部写 stderr。
+
+## Registry 适配，而不是复制工具逻辑
+
+Server 构造时同时接收 `registry` 和显式 `toolNames`：
 
 ```ts
-import { StdioMcpClient } from "./src/adapters/mcp-stdio-client.ts";
+const registry = new ToolRegistry();
+registry.register(readFileTool);
+registry.register(listDirTool);
 
-const client = new StdioMcpClient({
-  command: process.execPath,
-  args: ["/absolute/path/to/server.ts"],
-  env: {}, // 默认不继承父进程环境；只显式传必要变量
-  requestTimeoutMs: 10_000,
-  closeTimeoutMs: 2_000,
-  maxToolListPages: 100,
-  maxStderrChars: 65_536,
-  onNotification: (notification) => {
-    console.info(notification.method, notification.params);
-  },
+const server = new McpStdioServer({
+  registry,
+  toolNames: ['read_file', 'list_dir'],
+  workspaceRoot,
+  input: process.stdin,
+  output: process.stdout,
+  errorOutput: process.stderr,
+  serverInfo: { name: 'personal-agent-safe-demo', version: '0.1.0' },
 });
-
-const initialized = await client.connect();
-console.info(initialized.serverInfo);
-
-const firstPage = await client.listTools();
-const secondPage = firstPage.nextCursor
-  ? await client.listTools(firstPage.nextCursor)
-  : undefined;
-const allTools = await client.listAllTools();
-
-const result = await client.callTool("echo", { message: "hello" });
-console.info(result.content, result.structuredContent, result.isError);
-
-await client.close();
+await server.start();
 ```
 
-### 请求 ID、并发与取消
+### tools/list
 
-- 请求 ID 从 1 开始单调递增，本实例内不复用。
-- Response 只按 `id` 配对，不按到达顺序；`Promise.all` 中慢响应不会覆盖快响应。
-- `listTools`、`listAllTools`、`callTool` 接受 `{ signal }`。
-- 超时以 `TIMEOUT` 拒绝，AbortSignal 以 `ABORTED` 拒绝；两者都会移除 pending、计时器和 abort 监听器。
-- 传输仍打开时，超时/取消会发送 `notifications/cancelled`，参数为 `{ requestId, reason }`；取消通知本身没有响应。
-- 已取消的 Promise 不会由后续响应重新“成功”。迟到的未知 id 按协议异常处理，不会配给其他请求。
+对每个被明确选择的名称调用 `registry.describe(name)`，直接投影：
 
-### 分页策略
+```text
+Tool.name        → MCP tool.name
+Tool.description → MCP tool.description
+Tool.parameters  → MCP tool.inputSchema
+```
 
-`listTools(cursor)` 只取一页，cursor 原样视为不透明字符串。`listAllTools()` 循环跟随 `nextCursor`，直到字段消失；默认最多 **100 页**，可用 `maxToolListPages` 调整。达到上限抛出 `PAGINATION_LIMIT`，防止重复游标造成死循环。
+未注册或 Registry 策略不可见的工具不会列出。没有伪造 `outputSchema`，本日也不发布 `listChanged` 通知，因此声明 `{ tools: { listChanged: false } }`。
 
-## 6. 三层错误不能混写
+### tools/call 与 JSON 字符串参数
 
-| 层                     | 示例                                                      | Client 行为                                              |
-| ---------------------- | --------------------------------------------------------- | -------------------------------------------------------- |
-| 本地状态 / 能力 / 传输 | 未连接、未声明 tools、坏帧、未知 id、进程退出、超时、取消 | 以 `McpClientError` 拒绝，保留 `code` 与 `cause`         |
-| JSON-RPC / MCP 协议    | `-32602`、`-32601`、Server 返回的外层 `error`             | 以 `McpRpcError` 拒绝，保留 `rpcCode`、`message`、`data` |
-| 工具执行结果           | `result.isError=true`、`result.content` 含失败说明        | **正常返回** `McpCallToolResult`，不抛成 RPC 错误        |
+1. MCP 外层 `params.name` 必须是字符串，`params.arguments` 省略时按 `{}`，提供时必须是 JSON object。
+2. 调用前检查显式 `toolNames` 和 Registry 可见性；未选择、未知或不可见工具按协议返回 `-32602 Unknown tool`。
+3. 用 `JSON.stringify(arguments)` 生成 **Registry ToolCall.arguments 的 JSON 字符串**，同时生成带 MCP id 类型的 ToolCall id。
+4. 真正调用 `registry.execute(toolCall, { workspaceRoot, signal })`。没有第二份文件工具、权限或 Schema 逻辑。
+5. Registry 自己完成 JSON 解析、Schema 校验、策略和 Tool 执行；Tool 最终收到的是 Registry 校验后的参数值。
 
-因此下面的 `fail` 结果是工具已经执行后的业务结果，不是连接失败：
+因此，MCP 调用者传对象；Registry 边界仍保持 D027/D035 已验证的 JSON 字符串契约。
+
+## ToolResult 与错误映射
+
+| 场景 | 对外结果 |
+|---|---|
+| 工具成功 | `content:[{type:"text",text:result.content}]`，`isError:false` |
+| Registry Schema 失败，如 `INVALID_ARGUMENTS` | 工具结果 `isError:true`，不是 JSON-RPC transport error |
+| 文件不存在、路径越界等 ToolError | 工具结果 `isError:true`，保留原 content 和错误元数据 |
+| 敏感工具未确认，如 `TOOL_CONFIRMATION_REQUIRED` | 工具结果 `isError:true`；示例不会自动批准 |
+| MCP 外层 name/arguments 形状错误 | JSON-RPC `-32602 Invalid params` |
+| 未知、未选择或策略不可见工具 | JSON-RPC `-32602 Unknown tool`，不泄露隐藏工具 |
+| 未知方法 | JSON-RPC `-32601 Method not found` |
+| 非法信封 / 重复 initialize | JSON-RPC `-32600 Invalid Request` |
+| 畸形 JSON | JSON-RPC `-32700 Parse error`，`id:null` |
+| Registry 意外抛异常 | JSON-RPC `-32603 Internal error`，不把内部异常文本发给 Client |
+
+带 `ToolResult.error` 时，额外返回：
 
 ```json
 {
-  "content": [{ "type": "text", "text": "tool execution failed" }],
-  "isError": true
+  "structuredContent": {
+    "error": {
+      "code": "FILE_NOT_FOUND",
+      "message": "...",
+      "hint": "...",
+      "details": {}
+    }
+  }
 }
 ```
 
-`content`、`structuredContent`、`isError` 均保持各自语义。分页、Tool Schema 或 result 的 JSON 形状与 MCP 线格式一致，不转成纯字符串。
+实际字段按原对象保留，未出现的可选字段不会凭空补出。成功结果没有可靠的结构化业务数据，所以只返回文本 content 和 `isError:false`，不假装解析出 `structuredContent`。
 
-## 7. Server 主动消息的最小安全处理
+## 并发、取消与关闭
 
-- 对 Server 的 `ping` 请求返回同 id 的 `result: {}`。
-- 对未实现的反向请求（例如 `sampling/createMessage`）返回 `-32601 Method not found`，绝不伪造成功。
-- `notifications/cancelled`、`notifications/tools/list_changed` 等 Notification 通过 `onNotification` 暴露，不回复、不暗中声称已完成刷新。
-- 本日没有缓存工具列表；收到 `list_changed` 后是否重新列工具由调用方决定。
-- 畸形 JSON、非 JSON-RPC 2.0 消息、同时或都不含 `result/error` 的响应均按协议错误处理并关闭传输。
+- 读循环不 `await` 长工具；每次 `tools/call` 都独立执行，响应按完成顺序写出。
+- id 以 `类型 + 值` 建立内部键，避免 JSON-RPC 的 `1` 与 `"1"` 碰撞；响应始终使用原始 id。
+- 慢调用不阻塞后续快调用、ping 或取消通知；测试断言慢请求先发送、快请求先完成且 id 配对正确。
+- `notifications/cancelled` 找到在途 id 后调用真实 `AbortController.abort()`，同一 signal 已传给 Registry/Tool；取消后的迟到结果不会再写回。
+- 工具必须监听 `context.signal` 才能真正中止自身工作。对不合作、永不完成的 Tool，协议层不能强制收回其 Promise；未知取消 id 不产生错误响应。
+- stdio 关闭时 abort 所有在途调用、清空活动表、停止后续写响应。清理不依赖再收到一个非标准 shutdown 方法。
 
-## 8. TDD：先看到正确失败，再最小实现
+## 安全示例边界
 
-本日实际按 RED→GREEN 执行，而不是先写 Client 再补测试：
+`src/demo/d036-mcp-server.ts` 每次启动：
 
-1. **握手 RED**：先写 fixture 和 `test/d035-mcp-client.test.ts`，运行
-   `npx vitest run test/d035-mcp-client.test.ts`，因 `src/adapters/mcp-stdio-client.ts` 不存在而失败；随后只实现握手、单页列工具和关闭，转为 1/1 GREEN。
-2. **工具/协商 RED**：加入工具结果、RPC error、乱序并发、分页、能力和版本测试，观察到 **7 项按预期失败**（缺少 `listAllTools`、能力检查等）；最小实现后转为 9/9 GREEN。
-3. **健壮性 RED**：加入超时、AbortSignal、坏帧、未知 id、退出和双向消息测试，观察到 **4 项失败**：超时/取消 pending 悬挂，Server 请求/通知被误判；实现后转为 19/19 GREEN。
-4. **顽固进程关闭 RED**：fixture 忽略 EOF 和 SIGTERM，旧 `close()` 在 200ms 观察窗内仍未结束，测试按预期失败；加入有界 SIGKILL 升级与监听器清理后转为 20/20 GREEN。
+1. 在系统临时目录创建独立工作区。
+2. 只写入固定 `README.txt` 和 `hello.txt` 示例内容。
+3. 只注册并允许 `read_file`、`list_dir`。
+4. 不暴露 `shell`、任意命令、写文件、编辑文件、网络、进程环境变量或凭证工具。
+5. 继续沿用现有工作区路径逃逸防护；stdio 关闭后递归删除临时目录。
 
-测试过程中出现过两个测试设施问题：30ms 连 Node fixture 启动握手也计入导致初始化先超时，以及 `inspect` 在 Server 请求响应到达前读取状态。它们分别通过合理时限和 fixture 同步修正，没有放宽协议断言。
+测试中的 `shell` 调用得到 `Unknown tool`，不是把命令转交给 run_command。不要把本示例改成默认暴露整个生产 Registry；暴露新工具需要显式加入 `toolNames` 并单独评估权限。
 
-## 9. 单测覆盖的确定性场景
+## TDD 实录
 
-本地 fixture 通过真实 Node 子进程、真实 stdin/stdout ndjson 运行，覆盖：
+新行为先写测试并观察预期失败，再补实现：
 
-- 完整初始化与协议版本/结果校验；
-- 并发乱序响应、ID 配对；
-- 多页游标和循环游标上限；
-- 工具文本/结构化结果、`isError=true`；
-- JSON-RPC error 的 code/data；
-- 未声明 tools 的本地拒绝；
-- 超时、取消及取消通知；
-- 非 JSON 帧、未知响应 id、初始化前/操作中进程退出；
-- ping、未支持反向请求、取消/list_changed 通知；
-- stderr 有界保留、重复关闭、缺失可执行文件、SIGTERM 后的 SIGKILL 清理。
+1. **握手 RED**：`npx vitest run test/d036-mcp-server.test.ts` 首先因 `mcp-stdio-server.ts` 不存在而失败；最小实现后 initialize/版本/ping **2 项通过**。
+2. **Registry/协议 RED**：重复 initialize 仍返回成功、tools/list/call 无响应、未知方法无错误响应；补 Registry 投影和错误映射后转绿。测试还校正了两个历史契约理解：Registry 在 Tool 执行前解析 JSON；敏感标记使用 `{sensitive:true}` 注册选项。
+3. **并发/关闭 RED**：实际观察到畸形 JSON `SyntaxError`、非法 tools/list 参数返回工具列表、取消/关闭时 `aborted=false`；补 Parse error、参数校验、活动调用表和 AbortSignal 后 **15 项通过**。并发乱序测试验证了已有的非阻塞设计，未为通过测试而串行化。
+4. **示例 RED**：跨进程测试首次因子进程入口不存在报 `spawn ENOENT`；加入安全示例后，握手、真实 read_file、错误与关闭测试转绿。
 
-默认 `npm test` 不访问网络。`test/fixtures` 只是测试工具，**不能作为“连接外部 Server”的证据**。
-
-### 最终全仓验收
-
-- `npm run check`：ESLint、TypeScript 和 Vitest 全部通过，**38 个测试文件、360 项测试通过**。
-- `npm run test:coverage`：同样 **38 个测试文件、360 项测试通过**。
-- 总覆盖率：**Statements 92.84% / Branches 88.65% / Functions 99.64% / Lines 94.40%**，通过项目覆盖率门禁。
-- 其中 D035 新增 20 项测试；上述总数也包含既有回归测试，不把 fixture 数量当作外部互操作次数。
-
-## 10. 真实外部 Server 验证
-
-### 包与版本核实
-
-实际通过 npm registry 核实：
+最终完整验证：
 
 ```bash
-npm view @modelcontextprotocol/server-everything@2025.11.25 \
-  version bin dependencies.@modelcontextprotocol/sdk --json
+npm run check
+npm run test:coverage
 ```
 
-结果要点：
+本次覆盖率实跑：**40 个测试文件、376 项测试全部通过**；全项目 statements **92.08%**、branches **87.90%**、functions **99.33%**、lines **93.76%**，达到现有阈值。新增 Server 文件 statements **90.90%**、lines **94.95%**。
 
-- npm 包：`@modelcontextprotocol/server-everything@2025.11.25`；
-- 独立可执行文件：`mcp-server-everything`；
-- 其 MCP SDK 依赖声明：`^1.19.1`；
-- 该包版本的发布时间线与 `2025-11-25` 协议一致，因此本日固定此版本，而非猜测 latest 的兼容性。
+## 限制
 
-### 可复现命令与实际结果
-
-```bash
-npm run demo:d035
-```
-
-2026-11-12 在本机 Node.js `v24.19.0`、npm `11.17.0` 实际执行成功：
-
-1. `initialize` 协商到 `protocolVersion: "2025-11-25"`；
-2. Server `serverInfo` 为 `example-servers/everything` / `1.0.0`（这是 Server 自报版本，不等于 npm 包版本）；
-3. `tools/list` 返回 **11 个工具**；
-4. 真实 `tools/call`，工具为 `echo`，参数为 `{ "message": "D035 real external MCP stdio call" }`；
-5. 返回 `content[0].text = "Echo: D035 real external MCP stdio call"`，外层没有 JSON-RPC error，`isError` 未标记失败；
-6. 关闭 stdin 后，外部 npx/Server 进程退出。
-
-完整命令与原始输出见 [`docs/d035-external-transcript.txt`](./docs/d035-external-transcript.txt)。日志未记录环境变量或凭证，HOME 如出现在诊断中会替换为 `<HOME>`。npm 缓存位于仓库外，未加入依赖或提交到项目。
-
-## 11. 限制与下一步边界
-
-- 只支持一个 Client 实例对应一个独立 stdio Server 子进程，不做连接池。
-- 不做 HTTP/Streamable HTTP、SSE、Session 重连、Batch、MCP Server 或 D036 工作。
-- 不实现 resources/prompts 读写、订阅、logging、roots、sampling、elicitation；相关反向请求明确 `-32601`。
-- 不自动把远程 Tool 注册进本项目 Registry，也不替用户做工具授权或入参安全审查。
-- 不自动重试请求、不自动重连；请求 ID 不复用。
-- `onNotification` 只是可观察入口，不代表已执行资源/工具刷新。
-- 真实外部 demo 需要可用的 `npx`；缓存未命中时需要网络。网络失败应如实报错，不会回退成 fixture 冒充成功。
+- 只实现 MCP `2025-11-25` 的 stdio、initialize/ping/tools 生命周期；不实现 HTTP、WebSocket、2026-07-28。
+- 不实现 resources、prompts、sampling、roots、elicitation、logging、pagination 或动态 listChanged。
+- tools/list 一次返回显式选择的小集合；不提供游标分页。
+- 成功 ToolResult 只有文本 content；本日不声明 outputSchema，不推导成功 structuredContent。
+- stdio 是单 Client 会话；没有网络监听和传输层认证。安全边界来自本机进程隔离、显式工具集合和 Registry/工作区策略，而不是把 stdio 当成多租户服务。
+- 取消与关闭传递真实 AbortSignal，但强制终止非合作工具不是 JSON-RPC 能做到的；生产工具应检查 signal 并清理自己的子进程/定时器。
