@@ -127,6 +127,9 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         name: call.name,
         content: toolResult.content,
       });
+      if (options.signal?.aborted) {
+        return cancelled(turn);
+      }
       consecutiveToolErrors = toolResult.isError === true ? consecutiveToolErrors + 1 : 0;
       if (consecutiveToolErrors >= maxConsecutiveToolErrors) {
         options.eventSink?.emit({ type: 'run_completed', turn, stopReason: 'tool_errors' });

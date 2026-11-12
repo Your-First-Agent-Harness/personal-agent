@@ -1,171 +1,204 @@
-# D016 · 非法参数处理：校验 → 修复提示 → 重试上限 → 放弃
+# D017 · 失败路径测试矩阵：工具错误、模型故障与外部取消
 
-> 课程日期：2026-11-26
+> 课程日期：2026-11-27
 
 ## 今天的目标
 
-今天不新增一套参数校验器，而是用端到端回归测试证明已有的“非法参数恢复闭环”真正成立：
+今天把“出错时系统应该怎样表现”整理成一张可执行、可追踪的矩阵，而不是继续堆重复的错误单元测试。矩阵回答五个问题：
 
-1. 模型给出非法 JSON，错误作为 tool 消息回喂；下一轮修正为合法参数后，工具真实执行成功，最终 `completed`。
-2. 模型给出不符合 Schema 的参数，字段错误与修复提示回喂；下一轮修正后成功，最终 `completed`。
-3. 连续三次非法参数不会让进程崩溃，也不会执行工具；Provider 恰好收到三次请求，Loop 以 `tool_errors` 停止。
-4. 一次合法成功会清零此前的连续错误计数；成功之后重新累计到三次才停止。
+1. 工具可恢复失败是否变成 `ToolResult` 回喂，而不是抛穿 Loop？
+2. 连续工具错误达到上限后，是否以 `tool_errors` 正常返回？
+3. Provider 的 HTTP、协议和内部超时失败是否保持 `ModelError`，而不是伪装成工具结果？
+4. 外部取消是否以 `cancelled` 正常停止，并且不会被工具错误保险丝覆盖？
+5. 文件/命令失败是否保留结构化 code，未知工具异常是否脱敏后再进入 Provider 历史？
 
-交付物是 `test/d016-invalid-arguments.test.ts` 和本页教学内容。测试使用脚本化 Provider、真实 `ToolRegistry`、真实 `runAgentLoop` 和一个记录实际执行次数的 `echo` 工具，不访问真实模型。
+交付物包括：
 
-## 与 D014、D015 的关系
+- `test/d017-failure-paths.test.ts`：7 项新增集成证据；
+- `docs/adr/0001-failure-semantics.md`：失败语义边界决策；
+- `src/runtime/loop.ts`：一个由失败测试驱动的取消优先级最小修复；
+- 本页完整教学内容。
 
-D014 已经实现本日依赖的全部生产机制：
+## 先复用证据，再补真正的空白
 
-| 机制 | 现有位置 | 作用 |
-| --- | --- | --- |
-| JSON 解析 | `src/tools/registry.ts` | 解析失败返回 `INVALID_JSON`，不进入工具实现 |
-| Schema 子集校验 | `src/tools/schema.ts` | 检查类型、必填字段、额外字段和枚举等子集 |
-| 标准错误与 hint | `src/tools/errors.ts` | 形成 `content`、`isError` 和内部 `error` 详情 |
-| 错误回喂 | `src/runtime/loop.ts` | 把每次 assistant/tool 配对加入历史，再问 Provider |
-| 连续错误保险丝 | `src/runtime/loop.ts` | 默认上限为 3，成功清零，达到上限返回 `tool_errors` |
+D009、D014 和 D016 已经覆盖大量基础行为。本日没有把这些测试复制一遍，而是让矩阵同时引用“既有证据”和“新增集成证据”。
 
-D014 的测试还覆盖了同轮 `fail → fail → success → fail → fail → fail`：通用工具错误也会被成功调用清零。D015 则验证了失败测试回喂后编辑、复测成功的综合修复流程。
+| 矩阵行                     | 注入方式                                     | 必须保持的边界                                                                          | 可执行证据                                                                   | 本日动作                                   |
+| -------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------ |
+| F01 工具可恢复失败         | 文件不存在、命令退出 7、工具抛未知异常       | Registry 返回 `ToolResult`；错误 content 回喂；下一轮可正常 `completed`                 | D017 FP-01、FP-02、FP-03                                                     | 补 Loop 集成证据                           |
+| F02 非法参数恢复与连续错误 | 非法 JSON、Schema 错误、连续失败、成功后失败 | 错误回喂；成功清零；达到上限正常返回 `tool_errors`                                      | `d016-invalid-arguments.test.ts` 4 项；`tool-errors.test.ts` 连续保险丝 2 项 | 复用 D014/D016，不重复新增                 |
+| F03 Provider HTTP 失败     | mock fetch 返回 HTTP 503                     | 带 `status: 503` 的 `ModelError` 抛穿；无工具消息、无取消/完成事件                      | D017 FP-04；Provider 单元测试                                                | 补真实 Provider → Loop 证据                |
+| F04 Provider 协议失败      | mock fetch 返回非法 JSON                     | `ModelError` 抛穿，不变成 `ToolResult` 或 `tool_errors`                                 | D017 FP-05；Provider 单元测试                                                | 补真实 Provider → Loop 证据                |
+| F05 Provider 内部超时      | mock fetch 挂起，内部 timeout 触发           | 带 cause 的 `ModelError`，不是 `cancelled`                                              | D017 FP-06；D009 Provider 单元测试                                           | 补真实 Provider → Loop 证据                |
+| F06 外部取消               | 模型等待中取消；命令执行中取消且错误上限为 1 | 正常返回 `cancelled`，不发 `run_completed`，不被 `COMMAND_CANCELLED` 改判               | D009 `cancellation.test.ts`；D017 FP-07                                      | 补工具执行期间交叉场景并修复缺陷           |
+| F07 文件/命令 code 与脱敏  | 真实临时工作区、真实本地命令、伪造敏感值     | `FILE_NOT_FOUND` / `COMMAND_FAILED` 保留；未知异常为 `INTERNAL_ERROR`，原文不进后续请求 | D014 `tool-errors.test.ts` / `errors.test.ts`；D017 FP-01～03                | 只补跨 Registry、Loop、Provider 请求的证据 |
 
-D016 补的是另一层证据：**非法参数从 Provider 原始字符串出发，穿过 Registry、消息历史、下一轮 Provider 请求和终止条件**。因此本日没有重复实现 D014 的功能，也没有为了制造差异修改生产代码。
+矩阵不是另一份静态清单：FP 编号直接对应测试名，既有行也能用下文的 Vitest 命令执行。未来修改失败语义时，可以按行定位应运行的测试。
 
-## 恢复闭环的完整时序
+## 两条输出通道：Provider 看到的与 Harness 看到的不同
 
-### 1. 坏消息不直接抛穿 Loop
-
-模型发出的 `ToolCall.arguments` 是原始字符串。Registry 先查工具，再解析 JSON、校验 Schema，最后才调用 `execute`：
-
-```text
-Provider 返回非法 tool_call
-  → Loop 保存 assistant 消息
-  → Registry 解析 / 校验失败
-  → 工具 execute 没有被调用
-  → 得到 isError: true 的 ToolResult
-  → Loop 保存对应 tool 消息，连续错误数 +1
-  → 未达到上限，进入下一轮
-```
-
-非法 JSON 的模型线反馈包含：
+`ToolResult` 同时包含模型反馈和机器可读详情：
 
 ```text
-工具参数不是合法 JSON
-提示：请把 arguments 修正为合法 JSON 对象
+ToolResult
+├─ content             → Loop 写入 role: tool，下一次 Provider 请求可见
+├─ isError             → Loop 用于连续错误计数
+└─ error
+   ├─ code             → Harness / 调用方判断失败类别
+   ├─ message
+   ├─ retryable
+   └─ hint             → 修复建议，同时拼入 content
 ```
 
-Schema 类型错误则指出具体路径和期望类型，例如：
+D017 使用 `RecordingToolRegistry` 只记录真实 `super.execute()` 的返回值，不替换 Registry 行为。这样可以同时证明：
+
+- FP-01 的内部结果是 `FILE_NOT_FOUND`，而下一轮 Provider 收到“文件不存在”和修复 hint；
+- FP-02 的内部结果是 `COMMAND_FAILED`，Provider 收到原 JSON content，其中仍有 `exitCode: 7`、stdout、`timedOut: false` 和 `cancelled: false`；
+- FP-03 的内部结果是 `INTERNAL_ERROR`，后续请求只含通用错误文本，不含伪造密钥或原始 `stack trace`。
+
+内部 `error` 对象没有被塞进 Provider 消息。测试观察的是实际第二次请求，而不只是直接调用工具后的返回值。
+
+## Provider 故障为什么不能回喂成工具错误
+
+工具错误发生在“模型已经正常返回一次工具调用”之后；Provider 故障则意味着本轮连有效 assistant 响应都没有得到。二者的恢复主体不同：
 
 ```text
-参数校验失败：$.value，期望 string，实际为 number（期望 string）
-提示：请修正 $.value：期望 string；期望 string，实际为 number
+工具失败
+Provider assistant(tool_call)
+  → Registry / Tool 返回失败 ToolResult
+  → Loop 保存 assistant + tool
+  → 下一次 Provider 请求可根据反馈修正
+
+Provider 失败
+Loop 请求 chat
+  → HTTP / 协议 / 内部超时 ModelError
+  → 没有有效 assistant，没有对应 tool_call_id
+  → 不伪造 assistant/tool 历史，错误交给上层
 ```
 
-`content` 是 Provider 下一轮能看到的 tool 消息；内部 `error.code/message/retryable/hint` 供 Harness 和调用方使用。测试直接检查第二次 Provider 请求的最后一条消息，而不是只检查 Registry 的单独返回值，因此能证明“修复提示确实回喂”。
+FP-04～06 使用真实 `createOpenAICompatibleProvider` 和真实 `runAgentLoop`，只替换 `fetchImpl`。除了检查错误实例外，还检查事件流只有 `turn_started`：没有 `assistant_responded`、`tool_call_finished`、`run_cancelled` 或 `run_completed`。这能防止实现为了“让 Loop 更健壮”而把模型故障吞成正常结束。
 
-### 2. 修正不是自动重放旧参数
+HTTP 错误保留 `status`，协议错误说明非法 JSON，内部超时保留底层 `cause`。这些测试不访问 `provider.invalid`，因为所有请求都由 mock fetch 接管。
 
-第一轮错误不会触发 Harness 用原参数自动再执行一次。真正的恢复过程是：
+## 外部取消与工具错误保险丝的优先级
+
+### 首次 RED 发现的真实缺陷
+
+`run_command` 收到外部取消时会返回：
 
 ```text
-第 1 轮：assistant(arguments = 非法值)
-         → tool(错误与 hint)
-第 2 轮：Provider 看到错误
-         → assistant(arguments = 修正值)
-         → Registry 校验通过
-         → 工具真实执行
-         → tool(成功内容)，连续错误数清零
-第 3 轮：Provider 看到成功结果
-         → assistant(最终文本，无 tool_calls)
-         → stopReason = completed
+ToolResult.isError = true
+ToolResult.error.code = COMMAND_CANCELLED
+content.cancelled = true
 ```
 
-这里的“重试”是模型根据反馈生成一次新的工具调用。是否知道如何修正，是模型行为；是否保留错误上下文、是否阻止坏参数执行、是否设置终止上限，是 Harness 的职责。
+原 Loop 在工具返回后直接累加连续错误并判断上限。如果设置 `maxConsecutiveToolErrors: 1`，这个诊断结果会立刻触发 `tool_errors`，即使 `AbortSignal` 已经明确表达外部取消。
 
-### 3. 连续三次后放弃，而不是无限请求
+FP-07 用真实本地 Node 子进程复现：命令先写入 `started` 标记，再保持运行；测试确认进程启动后调用 `controller.abort()`。首次运行的实际结果是：
 
-Loop 对整个 run 维护一个连续错误计数：
-
-```ts
-consecutiveToolErrors = toolResult.isError === true
-  ? consecutiveToolErrors + 1
-  : 0;
-
-if (consecutiveToolErrors >= maxConsecutiveToolErrors) {
-  return { stopReason: 'tool_errors', /* ... */ };
-}
+```text
+7 项测试：6 通过，1 失败
+FP-07 期望 stopReason = cancelled
+实际 stopReason = tool_errors
 ```
 
-默认值是 3。第三次非法参数仍然会形成 assistant/tool 历史，但不会再发起第四次 Provider 请求，也不会把异常抛给调用方。结果是 `turns: 3`、`stopReason: 'tool_errors'`、`text: ''`。
+### 最小 GREEN 修复
 
-这个计数是所有连续工具错误共用的保险丝，不是“每种错误各有三次”，也不是“每个工具各有三次”。任何一次成功工具结果都会清零。
+Loop 仍保存工具结果和 `tool_call_finished`，便于诊断；但在更新连续错误计数之前检查一次外部取消：
 
-## 四个确定性测试场景
-
-测试工具名为 `echo`，只接受一个字符串字段：
-
-```json
-{
-  "type": "object",
-  "properties": { "value": { "type": "string" } },
-  "required": ["value"],
-  "additionalProperties": false
-}
+```text
+工具 execute 返回
+  → 发出 tool_call_finished
+  → 保存 role: tool 诊断消息
+  → signal.aborted？
+      ├─ 是：run_cancelled，返回 cancelled
+      └─ 否：更新连续错误计数，再判断 tool_errors
 ```
 
-工具的 `execute` 会记录收到的参数并返回 `echo:<value>`。所以 `executions` 既能证明合法调用真的发生，也能证明非法调用没有越过 Registry。
+修复只增加这一个边界检查，没有修改工具错误码、Provider 或命令实现。同一矩阵随后 **7/7 通过**。FP-07 还证明没有第二次 Provider 请求，最后事件是 `run_cancelled`，而不是 `run_completed(tool_errors)`。
 
-脚本化 Provider 按数组下标依次返回响应，同时保存每次请求的消息快照；脚本耗尽后会拒绝额外请求。Registry 和 Loop 不使用替身。
+这里不矛盾：单次命令可以结构化地报告 `COMMAND_CANCELLED`，但整个 run 的终止原因必须由外部取消决定。
 
-| 测试 | Provider 脚本 | 核心断言 |
-| --- | --- | --- |
-| 非法 JSON 后恢复 | 非法 JSON → 合法字符串参数 → 最终文本 | 第二轮请求含 `INVALID_JSON` 对应反馈和 hint；工具只执行修正后的参数；第三轮看到成功 tool 消息；最终 `completed` |
-| Schema 错误后恢复 | `value: 42` → `value: "schema-ok"` → 最终文本 | 第二轮请求包含 `$.value`、期望 `string` 和字段 hint；只执行合法值；最终 `completed` |
-| 三次非法参数后放弃 | 非法 JSON → 类型错误 → 缺少必填字段 | 工具执行次数为 0；Provider 恰好 3 次；三类错误依次回喂；最终 `tool_errors`，无第四次请求 |
-| 成功后重新计数 | 非法 JSON → Schema 错误 → 合法成功 → 非法 JSON → Schema 错误 → 非法 JSON | 合法工具只执行一次；成功结果进入第四轮请求；运行到第 6 轮才达到新一组三次错误并以 `tool_errors` 停止 |
+## 连续错误与取消不是同一种“正常返回”
 
-最后一个场景也能识别“忘记清零”的缺陷：如果第三次合法调用没有清零，第四次非法 JSON 就会凑成连续第三次错误并提前停止，不可能到达第六轮。
+`tool_errors` 和 `cancelled` 都会返回 `AgentLoopResult`，但语义不同：
 
-它与 D014 的同轮清零测试互补：D014 覆盖一轮内多个通用工具结果，D016 覆盖跨 Provider 请求的非法参数序列。
+| 结果              | 含义                                    | 最后事件                     | 是否表示模型故障 |
+| ----------------- | --------------------------------------- | ---------------------------- | ---------------- |
+| `completed`       | 最后一轮 assistant 不再请求工具         | `run_completed(completed)`   | 否               |
+| `tool_errors`     | 连续工具失败达到保险丝，任务未收敛      | `run_completed(tool_errors)` | 否               |
+| `cancelled`       | 调用方主动中止                          | `run_cancelled`              | 否               |
+| 抛出 `ModelError` | Provider HTTP、协议、网络或内部超时失败 | 本例只有 `turn_started`      | 是               |
+
+D014/D016 已证明连续三次错误和成功清零，因此本日不再新增一组相同测试。D009 已证明模型等待期间取消，本日只补工具执行期间与保险丝相交的空白。
+
+## 脱敏承诺的边界
+
+本日验证的是 D014 已有约定：**未知工具异常**统一变成通用 `INTERNAL_ERROR`，原始异常 message 和 stack 不进入后续 Provider 请求。测试使用显式伪造的 `sk-fake-D017-*` 字符串，不读取任何真实凭证。
+
+这不是“所有文本自动脱敏”的承诺：
+
+- 已知 `ToolError` 的 message/hint 是刻意保留的可操作反馈；
+- `run_command` 的 stdout/stderr 和 command 是工具协议明确返回的数据；
+- 本日没有新增通用密钥识别器，也没有改写命令输出。
+
+因此 ADR-001 和矩阵都只说未知异常脱敏，不夸大成完整数据防泄漏系统。
 
 ## 怎么运行
 
 ```bash
-git switch D016
+git switch D017
 npm install
-npx vitest run test/d016-invalid-arguments.test.ts
+npx vitest run test/d017-failure-paths.test.ts
+```
+
+执行矩阵引用的既有证据：
+
+```bash
+npx vitest run \
+  test/cancellation.test.ts \
+  test/errors.test.ts \
+  test/tool-errors.test.ts \
+  test/openai-compatible.test.ts \
+  test/d016-invalid-arguments.test.ts
+```
+
+完整验证：
+
+```bash
 npm run check
 npm run test:coverage
 ```
 
-这些命令不需要模型密钥，也不访问真实模型。测试没有读取或写入 `.env`。
+测试不需要模型密钥，不读取 `.env`，不访问公网。Provider 网络全部 mock；文件使用临时工作区；命令使用本机 Node 子进程并由测试终止；敏感值均为伪造字符串。
 
-本次实际结果：
+## TDD 与实际结果
 
-- 针对性测试：**1 个文件、4 项测试通过**。
-- `npm run check`：ESLint、TypeScript 类型检查和全量测试均通过；共 **17 个测试文件、163 项测试**。
-- `npm run test:coverage`：同样 **17 个测试文件、163 项测试全部通过**。
+- 首次运行 `test/d017-failure-paths.test.ts`：**6 项通过、1 项失败**。FP-01～06 描述已有行为，首次通过并作为回归测试保留；FP-07 暴露取消优先级缺陷，构成真实 RED。
+- 最小修改 Loop 后再次运行：**1 个文件、7 项测试全部通过**，完成 GREEN。
+- 没有为了制造 RED 反转已有行为断言，也没有为覆盖率复制 D009/D014/D016 的单元测试。
 
-| 覆盖率指标 | 实测结果 |
-| --- | ---: |
-| Statements | 96.60% |
-| Branches | 91.68% |
-| Functions | 98.07% |
-| Lines | 97.88% |
-| `src/runtime/loop.ts` | 四项均为 100% |
+最终实际验证结果：
 
-### 为什么首次通过也保留
+| 验证                       | 结果                                        |
+| -------------------------- | ------------------------------------------- |
+| 失败语义与 Loop 针对性回归 | **7 个文件、76 项测试通过**                 |
+| `npm run check`            | ESLint、`tsc --noEmit` 和全量 Vitest 均通过 |
+| 全量测试                   | **18 个文件、170 项测试通过，0 失败**       |
+| `npm run test:coverage`    | 同样 **18/18 文件、170/170 测试通过**       |
 
-四个测试都是在修改任何生产代码之前编写并首次运行的，且首次运行全部通过。这说明它们描述的是 D014/D015 已经具备的行为，而不是本日新增功能。
+V8 覆盖率实测：
 
-因此本日没有人为制造 RED、没有反转断言来假装修复，也没有为了产生生产差异而改动实现。这些测试作为已存在行为的 **integration/characterization regression tests** 保留：未来如果错误不再回喂、非法参数误入工具、Provider 请求次数漂移或成功不再清零，它们会失败。
+| Statements | Branches | Functions | Lines  | `src/runtime/loop.ts`    |
+| ---------- | -------- | --------- | ------ | ------------------------ |
+| 96.61%     | 91.72%   | 98.07%    | 97.89% | 语句/分支/函数/行均 100% |
 
-本日未进行真实模型验证，也不据此声称任何真实模型一定能自行修正参数；确定性测试验证的是 Harness 的反馈与停止机制。
+命令仅有本机 npm 关于未知 `home` 配置的既有 warning，没有测试失败、类型错误或 ESLint 错误。
 
-## 边界与常见误解
+## 今天不做什么
 
-- **Schema 校验是子集，不是完整 JSON Schema。** 本日只复用现有类型、必填字段等能力，不扩展 validator。
-- **三次是 Provider 交互轮次上限，不是执行坏参数三次。** JSON 解析或 Schema 校验失败时，工具实现一次都不会执行。
-- **第三次错误后没有第四次请求。** 最后一次 tool 错误仍保留在结果历史中，便于调用方诊断。
-- **成功清零的是连续计数，不是删除历史。** 之前的错误消息仍在消息历史里，后续请求仍可看到完整因果链。
-- **`tool_errors` 与 `max_turns` 不同。** 前者是连续工具错误保险丝，后者是模型不断要求工具时的轮数保险丝。
-- **`completed` 只表示最后一轮不再调用工具。** 测试另以工具执行记录和成功 tool 内容证明本场景确实修复成功，而不只看最终文本。
-- **脚本化 Provider 不证明真实模型会修复。** 它固定模型的下一步，让测试只验证 Harness 是否提供正确的恢复机会和停止条件。
+- 不新增 Provider 自动重试、退避或熔断策略；上层需要根据 `ModelError` 另行决定。
+- 不实现并行工具；但未来并行化必须保留外部取消优先级。
+- 不扩展 JSON Schema，不改变 D016 的非法参数恢复闭环。
+- 不实现命令沙箱或通用输出脱敏。
+- 不做真实模型或公网验证，不根据脚本化 Provider 推断模型一定会修复错误。
