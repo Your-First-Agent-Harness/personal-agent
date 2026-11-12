@@ -1,124 +1,135 @@
-# 安装与本地打包验证
+# personal-agent v0.1.0 安装与验收
 
-本文面向第一次拿到仓库的开发者。以下命令以 macOS / Linux、Node.js 24 为准，不需要发布 npm 包，也不需要真实模型密钥即可完成安装与打包冒烟。
+本指南面向第一次拿到仓库或 GitHub Release tarball 的用户。v0.1.0 的可安装能力包括 CLI、五个内置工具，以及无需 API Key 的真实三工具离线 Demo。
 
-## 1. 准备 Node.js 24
+## 1. 准备 Node.js
 
-从 Node.js 官网或你常用的版本管理器安装 Node.js 24，然后确认当前终端实际使用的版本：
+要求 Node.js 24 或更新版本；开发验收使用 Node.js `24.19.0`、npm `11.17.0`。
 
 ```bash
 node --version
 npm --version
 ```
 
-`node --version` 的主版本号应为 `24`。如果系统装有多个 Node.js 版本，先切换版本再执行后续命令；不要仅在 IDE 设置里修改解释器。
+发布包运行时是编译后的原生 ESM JavaScript，不需要 tsx、ts-node、TypeScript 或任何运行时 npm 依赖。TypeScript、Vitest 等仅在从源码开发时由 `npm ci` 安装为 devDependencies。
 
-## 2. 克隆并安装依赖
+## 2. 从源码做开发验证
 
 ```bash
 git clone https://github.com/Your-First-Agent-Harness/personal-agent.git
 cd personal-agent
-git switch D024
 npm ci
-```
-
-如果评审其他日分支，将 `D024` 换成对应分支名。`npm ci` 按 `package-lock.json` 安装，不更新锁文件；不要用 `npm install` 代替首次可复现安装。
-
-## 3. 配置占位符
-
-仓库提供 `.env.example`。复制为 `.env` 后再填写自己的值；`.env` 已被 Git 忽略，不要提交，也不要在日志或文档中打印真实密钥。
-
-```bash
-cp .env.example .env
-```
-
-最小配置格式如下，以下均为占位符，不是可用密钥或指定服务商：
-
-```dotenv
-PA_MODEL_API_KEY=sk-your-key-here
-PA_MODEL_NAME=your-model-name
-PA_MODEL_BASE_URL=https://your-openai-compatible-endpoint.example/v1
-PA_LOG_LEVEL=info
-```
-
-只有真实调用 OpenAI 兼容模型时才需要有效密钥。安装、静态检查、测试、覆盖率及下文的 tarball 冒烟均不会请求模型服务。
-
-## 4. 全量检查
-
-```bash
 npm run check
 npm run test:coverage
+npm run build
+npm run demo:g1
 ```
 
-`check` 依次执行 ESLint、TypeScript 类型检查和全部测试；覆盖率报告写入 `coverage/`。全局阈值为 statements `80`、functions `80`、lines `80`、branches `75`。进程测试会创建并清理临时子进程及数据库，SIGKILL 恢复测试应保留运行，不要为缩短时间跳过。
+`npm run check` 包含 ESLint、TypeScript typecheck 和全量测试。全量测试中的 D025 用例还会实际执行一次 `npm pack`、在 `/tmp` 新建目录安装 tarball，并从安装目录调用 bin。
 
-源码由 Node.js 24 直接运行。本地开发命令为：
+`npm run demo:g1` 执行的是构建后的 `dist/cli/main.js`。它不需要 `.env`、模型密钥或网络。
+
+## 3. 生成可安装 tarball
+
+在仓库根目录执行：
 
 ```bash
-npm run dev -- "你的任务"
+RELEASE_DIR="$(mktemp -d /tmp/personal-agent-v010.XXXXXX)"
+npm pack --pack-destination "$RELEASE_DIR"
 ```
 
-只有执行这条真实 Agent 命令时才需要把第 3 节占位符替换为有效配置。
+`prepack` 会自动运行 `npm run build`，所以包内使用的是最新 `dist`。生成文件为：
 
-## 5. npm pack 与干净目录安装冒烟
+```text
+personal-agent-0.1.0.tgz
+```
 
-`npm pack` 只在本机生成 tarball，不发布 npm，也不创建 GitHub release。下面把 tarball 和安装目录都放在新的临时目录中，避免复用仓库的 `node_modules` 或数据库。
+包保持 `private: true`，不会因此被发布到 npm；该 tarball 用于 GitHub Release 和本地干净安装。
+
+## 4. 在全新目录安装并运行 G1 Demo
+
+继续使用上面的 `RELEASE_DIR`：
 
 ```bash
-SMOKE_ROOT="$(mktemp -d)"
-npm pack --pack-destination "$SMOKE_ROOT"
-mkdir "$SMOKE_ROOT/install"
-npm install --prefix "$SMOKE_ROOT/install" \
-  "$SMOKE_ROOT/personal-agent-0.1.0-dev.tgz"
+npm install --offline --ignore-scripts \
+  --prefix "$RELEASE_DIR/install" \
+  "$RELEASE_DIR/personal-agent-0.1.0.tgz"
+
+(cd "$RELEASE_DIR/install" && ./node_modules/.bin/personal-agent demo)
 ```
 
-如果版本号变化，先查看 `npm pack` 输出的实际文件名，再替换命令中的 `.tgz` 文件名。`npm install` 必须成功退出，且临时目录中应存在 `node_modules/personal-agent/package.json`。
+这里安装的是 tarball，不是仓库目录；CLI 也不是用仓库 `node_modules` 或 `src` 启动。`--offline` 与 `--ignore-scripts` 进一步证明安装和 Demo 不依赖联网或安装脚本。
 
-当前 `0.1.0-dev` 是 `private` 的源码开发包，没有编译后的 `dist` 或 `exports`。Node.js 24 会拒绝剥离 `node_modules` 内 TypeScript 的类型（`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`），因此不要从这个 tarball 导入 `src/*.ts`，也不要把 `--experimental-transform-types` 当作绕过方案。可运行 Agent 的方式仍是第 4 节的仓库内 `npm ci` 与 `npm run dev`；公开可运行发布物不在本日范围内。
+Demo 使用**确定性离线脚本 ModelProvider**，不是实际 AI 模型响应；但下列操作全部通过真实 `ToolRegistry`、Agent Loop 和内置工具完成：
 
-下面的冒烟只验证 tarball 已安装、包元数据可读取且原生 `node:sqlite` 可用，不宣称安装了可导入的 JavaScript 运行时：
+1. `read_file` 读取临时工作区里有缺陷的 `math.js`；
+2. `run_command` 执行 `node --test math.test.js`，确认退出码为 `1`；
+3. `edit_file` 把 `left - right` 精确改为 `left + right`，输出真实 diff；
+4. 再次 `run_command`，确认测试退出码为 `0`；
+5. 重新读取最终文件，断言加法修复存在、临时目录已清理。
+
+机器可读输出可用于自动化验收：
 
 ```bash
-(
-  cd "$SMOKE_ROOT/install"
-  node --input-type=module --eval '
-    import { readFileSync } from "node:fs";
-    import { DatabaseSync } from "node:sqlite";
-    const manifest = JSON.parse(
-      readFileSync("node_modules/personal-agent/package.json", "utf8"),
-    );
-    if (manifest.name !== "personal-agent" || manifest.version !== "0.1.0-dev") {
-      throw new Error("tarball metadata smoke failed");
-    }
-    const database = new DatabaseSync(":memory:");
-    try {
-      if (database.prepare("SELECT 1 AS ok").get()?.ok !== 1) {
-        throw new Error("node:sqlite smoke failed");
-      }
-      console.log("personal-agent tarball install/sqlite smoke: ok");
-    } finally {
-      database.close();
-    }
-  '
-)
+(cd "$RELEASE_DIR/install" && ./node_modules/.bin/personal-agent demo --json)
 ```
 
-看到 `personal-agent tarball install/sqlite smoke: ok` 才表示上述安装、元数据与 SQLite 检查成功。该冒烟使用 `:memory:`，不会在工作目录留下 SQLite 文件。若失败，保留临时目录用于排查；排查结束后可删除整个 `$SMOKE_ROOT`。
+关键字段应为：
 
-## 6. 常见 `node:sqlite` 版本问题
+```json
+{
+  "provider": "deterministic-offline-script",
+  "beforeExitCode": 1,
+  "afterExitCode": 0,
+  "stopReason": "completed",
+  "turns": 5,
+  "workspaceRemoved": true
+}
+```
 
-### `No such built-in module: node:sqlite`
+如需删除本次安装，确认变量指向刚创建的 `/tmp/personal-agent-v010.*` 目录后，可执行 `rm -rf "$RELEASE_DIR"`。
 
-当前 Node.js 太旧，或终端仍指向旧版本。切换到 Node.js 24 后重新执行 `node --version` 和安装命令。
+## 5. 一条命令重复完整安装验收
 
-### 提示 SQLite 为实验功能，或旧版本需要实验开关
+源码仓库中提供同一流程的可重复脚本：
 
-部分旧 Node.js 22 版本的 SQLite API 和默认开关状态不同。本项目统一以 Node.js 24 验证，不通过额外实验开关兼容旧运行时，也不需要安装名为 `sqlite`、`sqlite3` 或 `better-sqlite3` 的 npm 包。
+```bash
+npm run test:acceptance
+```
 
-### 在 tarball 冒烟中找不到包元数据
+脚本自动完成构建、打包、全新 `/tmp` 目录离线安装、包内容检查、公开 ESM 导出导入、安装后 bin 的 G1 Demo，以及最终文件和退出码断言。成功标志：
 
-确认 `npm pack` 的 tarball 文件名与版本一致、`npm install` 成功退出，并确认最后的 `node` 命令是在 `$SMOKE_ROOT/install` 中执行。不要在仓库根目录读取元数据，否则不能证明检查的是干净安装目录中的 tarball 内容。
+```text
+G1_INSTALL_ACCEPTANCE_PASS
+```
 
-### 切换 Node.js 后仍失败
+脚本在 `finally` 中删除自己的临时目录，不会把 tarball 留在仓库。
 
-在新的干净终端重新执行 `npm ci`。若问题仍在，记录 `node --version`、`npm --version`、完整错误和所用分支；不要粘贴 `.env` 或真实 API Key。
+## 6. 可选：调用真实模型
+
+只有普通 CLI 的真实模型调用才需要用户自己的 OpenAI 兼容服务配置。G1 Demo 不读取也不使用这些值。
+
+从安装目录运行普通 CLI 前，在 shell 中导出配置：
+
+```bash
+export PA_MODEL_BASE_URL="https://your-provider.example/v1"
+export PA_MODEL_API_KEY="your-own-key"
+export PA_MODEL_NAME="your-model-name"
+export PA_WORKSPACE="/absolute/path/to/your/workspace"
+
+(cd "$RELEASE_DIR/install" && ./node_modules/.bin/personal-agent "读取项目结构并说明入口")
+```
+
+源码开发也可用 `.env` 配置后执行 `npm run dev -- "你的任务"`；`.env` 被 Git 与 npm 包排除。安装后的 bin 不自动加载 `.env`，因此应像上面一样显式导出环境变量。真实模型调用是否可复现取决于用户服务、密钥额度和模型行为，不属于离线 G1 Demo 的承诺。
+
+## 7. 包内容与边界
+
+tarball 包含 `dist` 的 `.js` 与 `.d.ts`、CLI bin、类型化 exports、README、LICENSE、本安装指南和 v0.1.0 Release Note。`src`、`test`、`scripts`、`coverage`、`.env*`、运行数据、仓库 dev 的 `node_modules` 与临时 tarball 均不进入包。
+
+v0.1.0 是第一周 G1 版本：不包含 MCP，不提供进程恢复、托管运行等后续能力的发布级支持。普通 CLI 仅适配 OpenAI 兼容协议。
+
+如果看到 `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`，说明误运行了旧的 `0.1.0-dev` 源码 tarball 或 `node_modules` 中的 `.ts` 文件。请改用本页的 v0.1.0 tarball 和 `.bin/personal-agent`，其入口为 `dist/cli/main.js`。
+
+## 8. Demo 记录状态
+
+本日未制作 mp4 或其他视频，本机没有可用的 asciinema，因此没有 `.cast` 或虚构的视频链接。仓库保存的是从已安装 bin 录下的[真实终端输出](../docs/demos/v0.1.0-terminal.log)，不是视频；上面的命令可完整复现。
