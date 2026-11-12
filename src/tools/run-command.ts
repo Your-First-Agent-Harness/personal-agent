@@ -18,8 +18,13 @@ export const runCommandTool: Tool = {
   parameters: {
     type: 'object',
     properties: {
-      command: { type: 'string', description: '要执行的单条 shell 命令' },
-      timeoutMs: { type: 'integer', description: '超时毫秒数，默认 10000，最大 30000' },
+      command: { type: 'string', minLength: 1, description: '要执行的单条 shell 命令' },
+      timeoutMs: {
+        type: 'integer',
+        minimum: 1,
+        maximum: MAX_TIMEOUT_MS,
+        description: '超时毫秒数，默认 10000，最大 30000',
+      },
     },
     required: ['command'],
     additionalProperties: false,

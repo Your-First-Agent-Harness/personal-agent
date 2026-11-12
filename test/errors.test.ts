@@ -275,9 +275,13 @@ describe('validateArguments JSON Schema 子集', () => {
     expect(validateArguments(schema, { profile: { name: 'Ada' } })).toBeUndefined();
   });
 
-  it('未知 Schema 关键字直接忽略，不宣称完整 JSON Schema', async () => {
+  it('支持 minLength，其他未知 Schema 关键字仍直接忽略', async () => {
     const { validateArguments } = await import('../src/tools/schema.ts');
 
-    expect(validateArguments({ type: 'string', minLength: 99 }, 'x')).toBeUndefined();
+    expect(validateArguments({ type: 'string', minLength: 2 }, 'x')).toMatchObject({
+      path: '$',
+      expected: '长度 >= 2',
+    });
+    expect(validateArguments({ type: 'string', pattern: '^never$' }, 'x')).toBeUndefined();
   });
 });

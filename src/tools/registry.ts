@@ -1,7 +1,7 @@
 import type { ToolCall } from '../core/message.ts';
 import type { Tool, ToolContext, ToolResult, ToolSchema } from '../core/tool.ts';
 import { errorResult, normalizeError, toolError } from './errors.ts';
-import { validateArguments } from './schema.ts';
+import { validateArguments, validateToolSchema } from './schema.ts';
 
 export type ToolMetadata = Readonly<Record<string, unknown>>;
 
@@ -33,6 +33,12 @@ function createEntry(tool: Tool, options: ToolRegistrationOptions): RegistryEntr
   }
   if (tool.parameters === null || typeof tool.parameters !== 'object' || Array.isArray(tool.parameters)) {
     throw new TypeError('非法工具注册：parameters 必须是对象');
+  }
+  const schemaIssue = validateToolSchema(tool.parameters);
+  if (schemaIssue !== undefined) {
+    throw new TypeError(
+      `非法工具注册：parameters ${schemaIssue.path}，${schemaIssue.message}（期望 ${schemaIssue.expected}）`,
+    );
   }
   if (typeof tool.execute !== 'function') {
     throw new TypeError('非法工具注册：execute 必须是函数');
