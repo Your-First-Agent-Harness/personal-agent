@@ -161,6 +161,50 @@ describe('runAgentLoop', () => {
     expect(result.messages.find((m) => m.role === 'tool')?.content).toContain('合法 JSON');
   });
 
+  it('运行中替换、注册和注销后，下一轮发现与当前执行都使用最新注册表', async () => {
+    const registry = new ToolRegistry();
+    registry.register({ ...echoTool(), description: '旧版 echo' }, { version: '1.0.0' });
+    registry.register({ ...echoTool(), name: 'retired' }, { version: '1.0.0' });
+    const requests: ChatRequest[] = [];
+    let requestCount = 0;
+    const provider: ModelProvider = {
+      name: 'hot-swap-scripted',
+      chat(request) {
+        requests.push(request);
+        requestCount += 1;
+        if (requestCount === 1) {
+          registry.replace({
+            ...echoTool(),
+            description: '新版 echo',
+            execute: () => Promise.resolve({ content: 'v2' }),
+          }, { version: '2.0.0' });
+          registry.unregister('retired');
+          registry.register({ ...echoTool(), name: 'fresh' }, { version: '1.0.0' });
+          return Promise.resolve({
+            text: '',
+            model: 'm',
+            toolCalls: [{ id: 'c1', name: 'echo', arguments: '{}' }],
+          });
+        }
+        return Promise.resolve({ text: 'done', model: 'm' });
+      },
+    };
+
+    const result = await loopWith(provider, registry);
+
+    expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual(['echo', 'retired']);
+    expect(requests[1]?.tools?.map((tool) => tool.name)).toEqual(['echo', 'fresh']);
+    expect(requests[1]?.tools?.[0]).toEqual({
+      name: 'echo',
+      description: '新版 echo',
+      parameters: { type: 'object', properties: {} },
+    });
+    expect(result.messages.find((message) => message.role === 'tool')?.content).toBe('v2');
+    expect(registry.describe('echo')?.version).toBe('2.0.0');
+    expect(registry.describe('fresh')).toBeDefined();
+    expect(registry.describe('retired')).toBeUndefined();
+  });
+
   it('模型一直要工具时，maxTurns 是保险丝', async () => {
     const { provider, requests } = scriptedProvider([
       {

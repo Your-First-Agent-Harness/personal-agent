@@ -40,7 +40,6 @@ export interface AgentLoopResult {
  */
 export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoopResult> {
   const messages: Message[] = [...options.messages];
-  const tools = options.registry.list();
   const usage = { inputTokens: 0, outputTokens: 0 };
   const maxConsecutiveToolErrors = options.maxConsecutiveToolErrors ?? 3;
   let consecutiveToolErrors = 0;
@@ -60,6 +59,8 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       return cancelled(turn);
     }
 
+    // 每轮重新发现：同一请求内保留快照，跨轮替换、注册和注销立即生效。
+    const tools = options.registry.list();
     const requestMessages = buildContext(messages, options.maxContextChars ?? 24_000);
     const request = {
       messages: requestMessages,

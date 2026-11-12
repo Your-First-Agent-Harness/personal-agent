@@ -1,199 +1,219 @@
-# D026：v0.1 发布复盘、第一批外部反馈与 issue 归档
+# Personal Agent · D027 工具注册中心
 
-计划日期：2026-12-06  
-基线：D025 `ab3c77c`  
-任务卡：D026「v0.1 发布复盘、读取第一批外部反馈、首批 issue 归档」。
+> 当日目标：让工具可以注册、发现、替换和注销，并为调用方提供版本与元数据。Agent Loop 不能一直拿着启动时的旧工具快照；这就是本日所说的“工具可热插拔”。
+>
+> 本日是进程内的 TypeScript 注册中心，不是 MCP，不包含网络加载、文件监听或插件包管理。
 
-> 本日结论：真实仓库的首批 open/closed issue 为 **0 条**，因此归档 0 条，不编造用户、评论、公开课或观看数据。交付物是一套可重复执行的只读查询、可追溯分类规则、未来 issue 模板和真实空快照。
+## 1. 先理解问题
 
-计划日期来自任务卡；下文 `capturedAt`、`publishedAt` 均保留 GitHub 实际返回值，不改写成任务卡日期。
+D026 的 `ToolRegistry` 已有 `register / list / execute`，但还缺少三项能力：
 
-## 1. 目标与范围
+1. 调用方无法查询某个工具的版本与部署元数据；
+2. 同名工具不能显式替换，也不能注销；
+3. `runAgentLoop` 在启动时只执行一次 `registry.list()`，之后即使注册表发生变化，后续模型请求仍使用旧 Schema。
 
-本日只完成四件事：
+D027 只补这三块，不重写工具系统。现有 `read_file`、`list_dir`、`write_file`、`edit_file`、`run_command`、参数校验、错误回喂、会话和演示继续沿用原契约。
 
-1. 根据仓库和 GitHub 已有事实复盘 v0.1.0，而不是补写不存在的发布活动。
-2. 用 `gh` 查询 `Your-First-Agent-Harness/personal-agent` 的 open 和 closed issue。
-3. 将编号、标题、状态、作者、URL、标签、时间、正文、评论和可复现信息整理成机器可读快照；有分类必须有依据。
-4. 用自动化测试证明空结果和未来的非空结果都能走同一套归档流程。
+## 2. 设计：执行、模型 Schema、调用方发现分开
 
-脚本只读 GitHub，只写本地 JSON。它不创建、关闭、编辑 issue，不发表或回复评论，不修改标签，也不读取或保存 token。没有升级依赖，没有实现 MCP 等后续任务，也没有修改 main 的课程索引。
+注册表内部仍以工具名为 key，但 value 现在包含：
 
-## 2. v0.1.0 发布事实复盘
+```ts
+{
+  tool,       // 真正的 Tool，含 execute
+  version,    // 非空版本标签
+  metadata,   // 调用方自定义元数据
+}
+```
 
-### 2.1 已核验事实
+公开读取有两条通道，不能混成一条：
 
-本日通过 `git show v0.1.0`、`gh release view v0.1.0` 和仓库已有发布文档交叉核对：
+| API | 使用方 | 返回内容 |
+| --- | --- | --- |
+| `list()` | 模型 Provider | 原有的 `name / description / parameters` |
+| `discover()` | 应用、调试器、管理界面 | 上述 Schema，加 `version / metadata` |
+| `describe(name)` | 应用按名称查询 | 单个发现结果；不存在时返回 `undefined` |
 
-| 项目 | 真实事实 |
-|---|---|
-| tag / commit | `v0.1.0` → `c5479fd3730e58082bc3fd4aea029fb708612759` |
-| GitHub Release | [personal-agent v0.1.0](https://github.com/Your-First-Agent-Harness/personal-agent/releases/tag/v0.1.0)，非 draft、非 prerelease |
-| GitHub `publishedAt` | `2026-11-12T16:04:42Z`；发布说明正文中的课程发布日期另标为 `2026-12-05`，两种口径不混用 |
-| Release 资产 | `personal-agent-0.1.0.tgz`，34,016 bytes |
-| 资产 SHA-256 | `cf9083a47f8b99d7e32417002060f3520f0c576975ce17df824ea8c86cf0205b` |
-| 运行边界 | Node.js 24+、原生 ESM、零运行时 npm 依赖，包仍为 npm `private` |
-| G1 能力 | 安装后的 bin 可运行离线 Demo，以确定性脚本模型驱动真实 `read_file` → `run_command` → `edit_file` → `run_command` |
-| 已有验收证据 | `docs/releases/v0.1.0.md`、`docs/install.md` 与 `scripts/verify-g1-install.ts` 记录了 tarball 离线安装和安装后运行验收 |
+这样增加管理能力不会改变发给 OpenAI 兼容接口的工具 Schema，也不会把内部标签泄露给模型。
 
-### 2.2 哪些做法值得保留
+### 热插拔的精确语义
 
-- **发布物从安装目录验收**：不是只检查仓库源码或包元数据，而是实际执行 `npm pack`、全新目录安装和安装后的 bin。
-- **模型与工具边界清楚**：离线 Demo 明示使用 `deterministic-offline-script`，不冒充外部模型；文件读写、编辑和命令执行是真实工具行为。
-- **证据可复现**：测试前后退出码、真实 diff、最终文件和临时目录清理都有断言，陌生人不需要凭一段成功文字判断发布是否可运行。
+- `register` 添加新名称；重名直接抛错，不静默覆盖。
+- `replace` 替换同名工具。先完整校验新工具，再一次性 `Map.set`；校验失败时旧版本仍可用。
+- `unregister` 删除名称，返回是否真的删除了条目。
+- `execute` 每次调用都按名称读取当前条目，因此替换后的下一次调用使用新实现。
+- Agent Loop **每轮开始前**重新调用 `list()`。同一个模型请求拿到稳定快照，下一轮请求看到最新注册、替换和注销结果。
 
-### 2.3 不能从这些事实推出的结论
+热插拔不等于取消正在执行的异步函数：若旧实现已经开始执行，本次调用会结束；后续调用才走新实现。
 
-- 离线 Demo 不证明外部模型质量、真实任务的智能程度或托管运行能力。
-- v0.1.0 不包含 MCP，不提供后续发布级进程恢复或托管能力。
-- 首批 issue 为 0 不等于用户满意，也不等于已有采用量；它只说明本次 GitHub Issues 查询没有记录。
-- 本日没有制作录屏，也没有新增公开课、外部活动或观看数据。
+## 3. 公共 API
 
-因此，当前可验证的下一步不是虚构“用户呼声”，而是持续保留真实查询入口，并在反馈出现后先补齐复现证据、再安排修复优先级。
+包入口导出 `ToolRegistry`，以及 `Tool`、`ToolDescriptor`、`ToolMetadata`、`ToolRegistrationOptions` 类型。
 
-## 3. 第一批 issue：真实查询结果
+```ts
+class ToolRegistry {
+  register(tool: Tool, options?: ToolRegistrationOptions): void;
+  replace(tool: Tool, options?: ToolRegistrationOptions): void;
+  unregister(name: string): boolean;
 
-查询目标：`Your-First-Agent-Harness/personal-agent`  
-快照时间：`2026-11-12T16:17:49.466Z`  
-快照文件：[docs/feedback/d026-v0.1-issues.json](docs/feedback/d026-v0.1-issues.json)
+  list(): ToolSchema[];
+  discover(): ToolDescriptor[];
+  describe(name: string): ToolDescriptor | undefined;
 
-| 状态 | 数量 | issue 编号 |
-|---|---:|---|
-| open | 0 | 无 |
-| closed | 0 | 无 |
-| 合计 | **0** | 无 |
+  get size(): number;
+  execute(call: ToolCall, context: ToolContext): Promise<ToolResult>;
+}
 
-实际执行的查询为：
+interface ToolRegistrationOptions {
+  readonly version?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+interface ToolDescriptor extends ToolSchema {
+  readonly version: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+}
+```
+
+### 兼容与默认值
+
+原来的 `registry.register(tool)` 不需要修改：
+
+- 未提供版本时，发现结果明确显示 `version: 'unversioned'`；
+- 未提供元数据时，发现结果为 `metadata: {}`；
+- `list()` 的字段和顺序规则保持原样；
+- `execute` 的 JSON 解析、参数校验和结构化错误语义保持原样。
+
+版本是非空字符串标签。本日不做 SemVer 解析、比较或自动升级，`'2026.12-beta'` 与 `'v2'` 都可以作为标签。
+
+## 4. 示例：注册、发现、替换、注销
+
+下面的 TypeScript 使用公开包 API；`node:assert/strict` 是 Node 内置模块，不增加运行时依赖。
+
+```ts
+import assert from 'node:assert/strict';
+import { ToolRegistry, type Tool } from 'personal-agent';
+
+const clockV1: Tool = {
+  name: 'clock',
+  description: '返回示例时间',
+  parameters: { type: 'object', properties: {} },
+  execute: () => Promise.resolve({ content: '12:00' }),
+};
+
+const registry = new ToolRegistry();
+registry.register(clockV1, {
+  version: '1.0.0',
+  metadata: { source: 'local', owner: 'demo' },
+});
+
+assert.equal(registry.describe('clock')?.version, '1.0.0');
+assert.deepEqual(registry.list(), [{
+  name: 'clock',
+  description: '返回示例时间',
+  parameters: { type: 'object', properties: {} },
+}]);
+
+const clockV2: Tool = {
+  ...clockV1,
+  description: '返回升级后的示例时间',
+  execute: () => Promise.resolve({ content: '13:00' }),
+};
+registry.replace(clockV2, {
+  version: '2.0.0',
+  metadata: { source: 'local', owner: 'demo' },
+});
+
+const result = await registry.execute(
+  { id: 'call-1', name: 'clock', arguments: '{}' },
+  { workspaceRoot: process.cwd() },
+);
+assert.equal(result.content, '13:00');
+assert.equal(registry.describe('clock')?.version, '2.0.0');
+
+assert.equal(registry.unregister('clock'), true);
+assert.equal(registry.unregister('clock'), false);
+assert.equal(registry.describe('clock'), undefined);
+```
+
+### 错误与缺失语义
+
+| 情况 | 结果 |
+| --- | --- |
+| 重名 `register` | 抛出 `工具重复注册：<name>`，旧条目不变 |
+| 对不存在的名称 `replace` | 抛出 `无法替换未注册工具：<name>` |
+| 空名称、空描述、缺少参数对象或执行函数 | 抛出带具体字段的 `TypeError` |
+| 空版本或非对象元数据 | 抛出带 `version` 或 `metadata` 的 `TypeError` |
+| 新替换条目校验失败 | 旧实现、旧版本和旧元数据保持不变 |
+| `unregister` 已注销或不存在的名称 | 返回 `false` |
+| `describe` 不存在的名称 | 返回 `undefined` |
+| `execute` 不存在的名称 | 返回 `UNKNOWN_TOOL` 的可重试 `ToolResult`，不是抛出异常 |
+
+这里的“非法注册”只检查 D027 所需的顶层工具契约，不在注册中心里另造一套 JSON Schema 校验器。执行参数仍由既有 `validateArguments` 处理。
+
+## 5. 如何亲自验证热插拔
+
+### 路径 A：注册表级替换与注销
 
 ```bash
-gh issue list \
-  --repo Your-First-Agent-Harness/personal-agent \
-  --state all \
-  --limit 1000 \
-  --json number,title,state,author,url,labels,createdAt,updatedAt,closedAt,body,comments
+npm test -- test/d027-tool-registry.test.ts
 ```
 
-原始 `gh issue list --state all` 返回 `[]`。因为没有 issue，本次没有可读取的评论、可归档编号或可分类对象。快照仍保留完整查询命令、时间、五类零计数和 `issues: []`，使“查过但没有”与“没有查”可区分。
+重点看这些用例：
 
-## 4. 可复用分类归档流程
+- “发现当前工具的版本和元数据，同时保持模型 Schema 不变”；
+- “替换同名工具后发现和执行都使用新版本”；
+- “非法替换不会破坏仍可用的旧版本”；
+- “注销立即移除发现和执行能力”。
 
-实现分为两层：
-
-- `src/feedback/issue-archive.ts`：纯数据转换，保留原始字段、给出分类依据、提取复现段落并统计。
-- `scripts/archive-feedback.ts`：调用 `gh issue list`，将真实结果写入 JSON；测试可注入查询器，避免测试联网或伪造仓库快照。
-
-流程固定为：**查询全部状态 → 原样保留正文字段 → 标签优先分类 → 标题关键词兜底 → 提取复现步骤 → 写快照 → 人工复核**。
-
-### 4.1 分类规则
-
-| 分类 | 已识别标签（不区分大小写） | 无已识别标签时的标题关键词 |
-|---|---|---|
-| `bug` | `bug`、`defect` | `bug`、`error`、`crash`、`failure`、`failed`、`缺陷`、`错误`、`崩溃`、`失败` |
-| `documentation` | `documentation`、`docs` | `documentation`、`docs`、`document`、`文档`、`教程` |
-| `enhancement` | `enhancement`、`feature`、`feature request` | `enhancement`、`feature`、`improvement`、`功能请求`、`增强`、`优化建议` |
-| `question` | `question`、`support` | `question`、`how to`、`support`、`疑问`、`如何`、`怎么` |
-| `other` | 无匹配 | 无匹配，不强行猜测 |
-
-先扫描全部已识别标签，再按 `bug` → `documentation` → `enhancement` → `question` 的顺序匹配标题关键词。因此，带 `Documentation` 标签的标题即使含有 `Bug`，仍归为文档类。每条非空结果都保存 `classification.evidence`，例如 `label "bug"` 或 `title keyword "feature"`，可以回看分类原因。
-
-这只是确定性初分，不代替维护者阅读正文和评论，也不会自动修改 issue。
-
-### 4.2 字段保真与未知值
-
-每条非空归档保留：
-
-- `number`、`title`、`state`、`author`、`url`、`labels`；
-- `createdAt`、`updatedAt`、`closedAt`；
-- 完整 `body` 和 `comments`（评论作者、正文、时间、URL）；
-- `classification` 与 `reproduction`。
-
-缺失的作者、正文和时间写为 `unknown`。空标签数组表示确实没有标签；open issue 的 `closedAt: null` 表示尚未关闭，而不是数据丢失。脚本识别 `Steps to reproduce`、`Reproduction steps`、`Reproduction`、`Repro steps`、`复现步骤`、`如何复现` 等 Markdown 标题，并原样截取到下一标题前。没有显式段落时记为 `unknown`，这不等于“无法复现”，完整正文仍可供人工检查。
-
-## 5. 复现与运行方式
-
-需要 Node.js 24+ 和已具备目标仓库只读访问权限的 `gh`。无需安装新依赖。
+### 路径 B：Agent Loop 运行中增删改
 
 ```bash
-# 查询真实仓库并覆盖本日快照
-npm run feedback:archive
-
-# 同一流程写入另一份快照，不改 GitHub issue
-npm run feedback:archive -- docs/feedback/next-issue-snapshot.json
-
-# 只运行本日新增测试
-npx vitest run test/d026-feedback-archive.test.ts test/d026-feedback-command.test.ts
+npm test -- test/loop.test.ts -t '运行中替换、注册和注销后'
 ```
 
-成功输出类似：
+该集成测试不是只检查 `Map`：
 
-```text
-ISSUE_ARCHIVE_PASS total=0 open=0 closed=0 output=<本地快照路径>
+1. 第一次模型请求看到 `echo@1.0.0` 和 `retired`；
+2. Provider 返回前，把 `echo` 替换为 `2.0.0`，注销 `retired`，注册 `fresh`；
+3. 当前 `echo` 调用立即执行新版实现；
+4. 第二次模型请求只看到新版 `echo` 和 `fresh`，看不到 `retired`；
+5. 请求里的工具仍只有原 Schema 字段，没有 `version` 和 `metadata`。
+
+因此它同时证明了“当前执行不陈旧”和“下一轮发现不陈旧”。
+
+## 6. 测试与完整检查
+
+```bash
+# 定向测试
+npm test -- test/d027-tool-registry.test.ts test/loop.test.ts test/tools.test.ts
+
+# Lint、类型检查与全量测试
+npm run check
+
+# 全量测试与覆盖率
+npm run test:coverage
 ```
 
-`output` 是本地路径；`total` 必须结合快照时间和查询命令解读。网络或鉴权失败时命令非零退出，不拿旧数据冒充新查询。凭证只由本机 `gh` 管理，不进入脚本参数、快照、日志或提交。
+推荐阅读顺序：
 
-## 6. 未来 issue 的信息模板
+1. `src/tools/registry.ts`：注册条目、发现视图、替换和注销；
+2. `src/runtime/loop.ts`：每轮请求前重新读取 `registry.list()`；
+3. `test/d027-tool-registry.test.ts`：注册中心行为矩阵；
+4. `test/loop.test.ts` 的“运行中替换、注册和注销后”用例：端到端热插拔证据。
 
-未来收到反馈时，可请报告者提供以下信息。模板只是归档规范，本日没有用它创建任何 issue。
+## 7. 明确边界
 
-```markdown
-## Problem / 问题
-实际遇到了什么问题？
+- **仅当前进程、当前实例**：不持久化注册表，重启后由应用重新注册。
+- **不是远程插件系统**：不扫描目录、不监听文件、不下载代码、不启动子进程加载插件。
+- **不是 MCP**：协议适配、远程发现和 MCP 生命周期属于后续课程。
+- **不做版本仲裁**：版本用于发现和审计，不参与依赖解析或灰度选择。
+- **不做权限控制**：调用方能操作同一个注册表，就能替换其中工具。
+- **不做熔断**：工具执行失败仍按既有错误回喂策略处理。
+- **元数据是浅只读类型**：不在本日引入深冻结或复杂元数据 Schema；不要把凭证放进元数据。
 
-## Steps to reproduce
-1. 执行的安装或运行命令
-2. 最小操作步骤
-3. 可公开的最小输入或仓库
+## 8. 与 D028 衔接
 
-## Expected
-期望结果是什么？
+D027 已经把两个职责分开：注册中心管理“当前有哪些工具及其版本”，`parameters` 则继续描述模型可见的输入契约。D028 可以在此基础上统一 `inputSchema / outputSchema` 及其类型推导，而无需再次实现注册、替换、注销或热插拔。
 
-## Actual
-实际结果、退出码和错误是什么？
-
-## Environment
-- personal-agent 版本或 commit：
-- Node.js 版本：
-- 操作系统：
-- 安装方式：
-
-## Logs
-粘贴必要日志；先删除 API Key、token、Cookie、私有路径和其他敏感信息。
-```
-
-有真实 issue 后，应先检查正文和必要评论，再确认自动分类是否符合证据；缺少的版本、环境或复现信息保持 `unknown`，不能由归档者补猜。
-
-## 7. TDD、测试与覆盖率
-
-新增行为按 RED → GREEN 实施：
-
-1. 先写归档入口测试，观察到模块不存在导致断言失败；补最小入口后，再写空快照、字段保真、未知值、标签优先级和复现提取测试，观察到 `not implemented` 失败后才实现。
-2. 查询脚本同样先观察入口测试失败，再以注入查询器的行为测试要求精确的 `gh --state all` 参数和 JSON 写入；确认失败后补实现。
-3. 最后真实执行 `npm run feedback:archive`，生成的 0 条快照来自 GitHub，不来自测试夹具。
-
-本分支实际执行：
-
-| 命令 | 结果 |
-|---|---|
-| `npm run check` | ESLint、typecheck、32 个测试文件 / 239 项测试全部通过 |
-| `npm run test:coverage` | 32 个测试文件 / 239 项测试全部通过，阈值未修改 |
-| `npm run feedback:archive` | 真实查询成功，归档 0 条 open、0 条 closed |
-
-全库覆盖率（语句 / 分支 / 函数 / 行）：
-
-```text
-94.54% / 89.32% / 98.85% / 95.29%
-全局阈值：80 / 75 / 80 / 80（未修改）
-src/feedback/issue-archive.ts：100% / 78.57% / 100% / 100%
-```
-
-测试中的 issue 编号和作者只是明确隔离的单元测试夹具，不出现在真实快照或发布复盘结论中。
-
-## 8. 边界与明日衔接
-
-- 查询上限为 1000 条；本次实际为 0 条，不受此上限影响。未来达到上限时必须扩大查询范围，不能声称已完整归档。
-- 评论按 `gh issue list --json comments` 的返回内容保存；本次没有 issue，未触发评论分页问题。未来需要完整评论历史时，应逐条核对 issue 并记录查询范围。
-- 标题关键词可能误判，分类只用于首轮整理；修复优先级仍需影响范围、复现证据和人工判断。
-- 空快照是一次带时间戳的观测，不是永久状态，也不是外部采用度指标。
-
-明日应从最新 `origin/D026` 创建下一日分支，先重跑查询并生成新快照：若仍为 0 条就如实记 0；若出现新 issue，则保存原始字段、阅读必要评论、复核分类和复现信息，再决定当天工作。不要沿用旧快照假装新反馈，也不要提前实现 MCP 等后续任务。
+同样，D027 没有提前实现 D028 的完整 Schema 体系、D029 的权限策略或 D030 的熔断器。保持这个边界，后续任务才能各自只解决一个问题。
