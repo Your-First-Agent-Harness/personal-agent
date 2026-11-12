@@ -18,6 +18,8 @@ try {
       name: 'blocking-provider',
       chat: () => {
         process.stdout.write(`${JSON.stringify({ type: 'ready', runId, sessionId })}\n`);
+        // 只有 pending Promise 不会留住事件循环；用定时器确保进程等待真实 SIGKILL。
+        setInterval(() => undefined, 60_000);
         return new Promise<ChatResult>(() => {});
       },
     };

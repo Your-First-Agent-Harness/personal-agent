@@ -127,7 +127,7 @@ const recovered = service.recover('session-1');
 
 1. 使用 `process.execPath` 启动第一个独立 Node 子进程，数据库位于临时目录。
 2. 子进程创建真实 SqliteSessionStore、SqliteRunStore、PersistentAgentService，并运行真实 `runAgentLoop`。
-3. 用户消息与 running 记录落盘后，Provider 输出 `ready`，随后返回永不完成的 Promise，Loop 真实阻塞在 Provider。
+3. 用户消息与 running 记录落盘后，Provider 输出 `ready`，随后返回永不完成的 Promise，Loop 真实阻塞在 Provider。夹具同时保留一个定时器句柄；只有 pending Promise 不会保持 Node 事件循环存活，否则进程可能在收到信号前自然退出。
 4. 父进程收到 ready 后发送 `SIGKILL`，并验证子进程退出信号确为 `SIGKILL`。
 5. 启动第二个独立 Node 子进程，用新的 store/service 实例重新打开同一个 SQLite 文件。
 6. 第二进程恢复出同一 `crash-run`，状态为 `interrupted`；Session id 为 `crash-session`，历史完整保留 `崩溃前必须落盘`。
@@ -191,6 +191,8 @@ npm run test:coverage
 | D021 `session-store.ts` | 88.46% | 90% | 100% | 88.46% |
 
 首次 coverage 曾触发旧 `run_command` 50ms 超时测试的 PID 临时文件竞态；该旧测试针对性复验通过，随后完整 coverage 重跑 208/208 通过。本日未修改旧 `run_command` 文件。
+
+主代理独立复核时，coverage 又暴露出崩溃夹具的自然退出竞态：pending Promise 本身不保持 Node 进程存活，导致父进程偶尔观察到 `code=0、signal=null` 而非 SIGKILL。修复仅限于夹具增加存活定时器，未改生产代码；修复后该测试连续运行 5 次均通过，完整 coverage 再次达到 26 文件、208/208 通过，全局覆盖率保持 94.38% statements、89.34% branches、98.67% functions、95.13% lines。
 
 ---
 
