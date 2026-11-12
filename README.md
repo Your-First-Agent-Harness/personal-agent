@@ -1,497 +1,624 @@
-# D019 · 错误不是异常终点：一次真实 Agent 修复如何闭环
+# D020 · 让回答逐字抵达：一次全链路真实流式改造
 
-> 课程日期：2026-11-29
+> 交付形态：当日教学长文 + 可执行代码与测试。
 >
-> 交付形态：课程长文 + 可执行 Demo。本环境没有已制作视频，因此不提供视频链接或观看数据。
+> 基线：D019 提交 `ed27b3ca850a5e86b630bc54f0fb64bc00e995ff`。
 
-一个 Agent 系统成熟的标志，不是工具永远不失败，而是失败之后仍能回答三个问题：**发生了什么、由谁决定下一步、整个任务为什么停止。**
+非流式 Agent 的等待体验很直接：请求已经发出，模型可能正在生成，终端却长时间没有任何变化。直到整段响应返回，答案才一次性出现。
 
-今天用仓库里一个已经发生、已经修复、而且可以重复回放的缺陷，走完这条证据链：
+D020 打通的不是一个“打字机动画”，而是一条真正的数据通路：
 
 ```text
-真实失败路径
-  → 可重复的最小回归测试
-  → 找到互相冲突的停止语义
-  → 三行最小修复
-  → 同一测试由红变绿
-  → 在临时仓库副本中用真实工具再演一次修复
-  → 明确这套证据不能证明什么
+OpenAI-compatible SSE 字节流
+  → 增量 UTF-8 解码
+  → SSE 事件解析
+  → Provider 文本增量与工具片段聚合
+  → Loop assistant_delta 事件
+  → CLI 即时写出
+  → 最终答案只出现一次
 ```
 
-这里所说的“真实”有明确边界：
-
-- D017 提交 `26a8dc4` 增加了失败路径矩阵，其中 FP-07 固定了取消优先级缺陷，并在 `src/runtime/loop.ts` 加入三行修复；
-- D018 提交 `83ab5d2` 增加 `scripts/d018-real-repair.ts`，在系统临时目录中重建旧缺陷，再用真实工具完成修复回放；
-- D019 只把这些已有代码、测试和本次实测整理成教学内容，不重新实现 D014–D018 的功能。
-
-这个缺陷不是来自 GitHub issue，也没有被包装成用户反馈或线上事故。本文不虚构外部链接、发布量、真实 ARK 成功记录或性能结论。
+工具调用、用量统计、取消、超时和旧 Provider 契约也必须继续成立。否则只是让普通聊天看起来更快，却让 Agent 在最需要可靠性的路径上失去原有能力。
 
 ## 读完你能带走什么
 
-1. 看懂一次工具调用如何穿过 Loop、Provider、ToolRegistry，再变成 `role: "tool"` 的历史消息。
-2. 区分单次工具的 `COMMAND_CANCELLED` 与整个 run 的 `stopReason: "cancelled"`。
-3. 解释为什么取消检查必须放在**工具结果入历史之后、连续错误保险丝之前**。
-4. 亲自运行 D018 Demo，核验“旧副本失败、精确编辑、同一测试通过”的闭环。
-5. 识别脚本化 Provider、临时目录、覆盖率和取消机制各自的能力边界。
+1. 解释 `chat()` 与可选 `streamChat()` 如何共存，旧 Provider 为什么不需要跟着修改。
+2. 区分网络字节分帧与 SSE 事件分帧，处理任意字节边界、CRLF、注释、多行 `data:` 和 `[DONE]`。
+3. 按协议 `index` 聚合交错的流式工具调用，而不是按到达顺序错误拼接参数。
+4. 理解 Loop 的 `streaming` 开关、`assistant_delta` 事件和不支持流式时的回退。
+5. 解释 CLI 如何实时输出、避免最终答案重复，同时不吞掉取消或未收敛提示。
+6. 分清外部取消、Provider 内部超时、网络故障、HTTP 故障和协议故障。
+7. 用本地 SSE 服务跑通 CLI 子进程全链路测试，并准确说明“没有调用真实 ARK”的验证边界。
 
-## 一、先把三种“失败”分开
+## 一、改造前的断点在哪里
 
-Agent 最容易发生的混乱，是把所有不顺利都压成一句“执行失败”。本仓库刻意保留三条不同的语义通道。
+D019 的 Provider 只有一次性请求：
 
-| 情况 | 代码中的表达 | Loop 的处理 |
-| --- | --- | --- |
-| 工具失败 | `ToolResult.isError === true`，可带结构化 `error` | 未达到连续错误上限时，作为 tool 消息回喂；达到上限时以 `tool_errors` 停止 |
-| Provider 故障 | HTTP、协议、网络或 Provider 内部超时形成 `ModelError` | 不伪装成工具结果，继续抛给上层决定如何处理 |
-| 外部取消 | 调用方触发 `AbortSignal` | 整个 run 以 `cancelled` 正常终止，并发出 `run_cancelled` |
-
-Provider 请求期间的外部取消会先由 Provider 归一为 `ModelCancelledError`，Loop 再把它转成 `cancelled`。它不应和 Provider 的 HTTP 故障混为一谈。
-
-还有两种正常返回的停止原因：模型不再调用工具时是 `completed`，轮次耗尽时是 `max_turns`。今天关注的焦点是：**为什么一个已经发生的外部取消，旧实现却会报告 `tool_errors`？**
-
-答案不是命令没有取消，也不是错误码错了，而是两个本来都正确的机制，在错误的先后顺序里争夺了最终解释权。
-
-## 二、一次工具调用如何穿过整个 Harness
-
-核心入口是 `src/runtime/loop.ts` 的 `runAgentLoop()`。可以把一次调用压缩成下面这张图：
-
-```text
-调用方
-  │  messages / maxTurns / maxConsecutiveToolErrors / AbortSignal
-  ▼
-Loop
-  │  registry.list() 取得工具 Schema
-  ▼
-Provider.chat({ messages, tools, maxTokens, signal })
-  │  返回 text / toolCalls / usage
-  ▼
-Loop 保存 assistant 消息
-  │  按 toolCalls 顺序串行执行
-  ▼
-ToolRegistry.execute(call, { workspaceRoot, signal })
-  │  找工具 → 解析 JSON → 校验参数 → tool.execute()
-  ▼
-ToolResult { content, isError?, error? }
-  │
-  ▼
-Loop 发 tool_call_finished → 保存 role: tool 消息
-  │
-  ├─ 检查 signal.aborted：是则 cancelled
-  │
-  └─ 否则更新连续错误计数，必要时以 tool_errors 停止
-       │
-       └─ 未停止且还有后续轮次：把新历史再次交给 Provider
+```ts
+chat(request): Promise<ChatResult>
 ```
 
-### 2.1 Loop：编排者，不是模型，也不是工具
+它适合表达完整的模型响应，却没有“响应尚未结束，但已经有一小段文本”的位置。即使 CLI 想提前显示，也只能等 `chat()` 返回。
 
-`src/runtime/loop.ts` 负责：
+因此，流式改造不能只改终端。终端没有数据源，Loop 没有增量事件，Provider 没有增量读取，任何单点修改都无法形成真实流式输出。
 
-- 保存完整消息历史；
-- 把工具 Schema 和历史交给 Provider；
-- 按 Provider 返回的顺序串行执行工具；
-- 发出 `turn_started`、`assistant_responded`、`tool_call_started`、`tool_call_finished` 等事件；
-- 根据工具结果、外部信号和轮次限制决定何时停止。
+D020 将职责拆成四层：
 
-它不会自己阅读测试输出并决定修哪里。下一轮采取什么动作，来自 Provider 的下一次响应。
+| 层 | 新增职责 | 明确不负责 |
+| --- | --- | --- |
+| OpenAI-compatible Provider | 读取 SSE、交付文本增量、聚合完整结果 | 不执行工具，不直接写终端 |
+| Loop | 按开关选择流式能力，把 delta 转为领域事件 | 不解析 SSE，不处理终端换行 |
+| CLI | 开启流式、即时输出、完成时去重 | 不重新请求模型，不修改 agent 历史 |
+| Logger | 继续记录摘要事件 | 不为每个 delta 刷一条日志 |
 
-### 2.2 Provider：提出动作，不直接执行动作
+最终仍返回同一个 `ChatResult`。这一点很重要：**增量是及时反馈，完整结果是后续编排的确定依据，两者不是二选一。**
 
-`src/adapters/model/provider.ts` 定义了最小契约：
+## 二、从可选 Provider 能力开始
 
-- 输入是 `messages`、`maxTokens`、可选 `tools` 和 `signal`；
-- 输出是文本、模型名、可选 `toolCalls` 和 token 用量。
+`src/adapters/model/provider.ts` 保留原有 `chat()`，增加可选方法：
 
-`src/adapters/model/openai-compatible.ts` 负责把这些领域消息转换为 OpenAI 兼容线格式，也把外部请求取消转换为 `ModelCancelledError`。HTTP 非成功、响应结构不合法等仍是 `ModelError`，不会被偷偷写成一次工具失败。
+```ts
+export interface ModelProvider {
+  readonly name: string;
+  chat(request: ChatRequest): Promise<ChatResult>;
+  streamChat?(
+    request: ChatRequest,
+    onDelta: (delta: string) => void,
+  ): Promise<ChatResult>;
+}
+```
 
-D018 Demo 使用的是 `scripted-d018`：它按预定顺序返回五个响应。这样可以重复测试 Harness 的编排和工具行为，但它不是会自主规划的模型。
+`onDelta` 只携带本次新增的文本，不携带“到目前为止的完整答案”。调用方可以顺序写出，Provider 同时把这些片段拼成最终的 `result.text`。
 
-### 2.3 ToolRegistry：把执行失败变成可处理的数据
+方法可选带来两个直接收益：
 
-`src/tools/registry.ts` 同时承担两件工作：
+- 旧测试里的 scripted Provider 不必为了实现新接口而增加空方法；
+- Loop 可以做能力检测，在 Provider 不支持流式时回退到 `chat()`。
 
-- `list()` 向 Provider 提供稳定的工具 Schema；
-- `execute()` 根据调用名找到工具，解析并校验参数，然后执行。
+OpenAI-compatible Provider 则同时实现两种方法。原有 `chat()` 保持普通 JSON 请求，`streamChat()` 在请求体中明确加入：
 
-未知工具、非法 JSON、非法参数和预期工具失败都会成为 `ToolResult`。工具抛出的异常也会在 `execute()` 内被标准化；未知异常统一脱敏为 `INTERNAL_ERROR`，而不是把原始堆栈直接送进后续模型历史。
+```json
+{
+  "stream": true,
+  "stream_options": { "include_usage": true }
+}
+```
 
-这就是“错误不是异常终点”的第一层含义：**工具失败通常是下一轮决策所需的数据，不必立刻炸穿整个 Loop。** 但连续错误保险丝仍然存在，避免系统永远不收敛。
+工具定义仍按原线格式放在 `tools` 中，不会因为切换到流式而丢失 Agent 的工具能力。
 
-### 2.4 tool 消息：把一次调用的证据接回历史
+## 三、全链路时序：文本如何一路到达终端
 
-`src/core/message.ts` 中，assistant 消息可以携带 `toolCalls`；工具完成后，Loop 写入：
+一次普通回答的完整路径如下：
+
+```text
+CLI runTurn
+  │ streaming: true
+  ▼
+Loop
+  │ provider.streamChat(request, onDelta)
+  ▼
+OpenAI-compatible Provider
+  │ POST /chat/completions，stream: true
+  ▼
+本地或远端 OpenAI-compatible 服务
+  │ SSE data: ... delta.content ...
+  ▼
+Provider
+  │ onDelta("你")
+  ▼
+Loop eventSink
+  │ { type: "assistant_delta", turn: 1, delta: "你" }
+  ├──────────────→ Logger sink：不写逐 delta 摘要
+  └──────────────→ Terminal sink：立即 write("你")
+
+后续片段沿同一路径继续到达；流结束后：
+```
+
+```text
+Provider 返回 ChatResult
+  │ text / model / toolCalls? / usage?
+  ▼
+Loop 保存完整 assistant 消息
+  │ assistant_responded
+  ▼
+CLI complete(result.text)
+  │ 已经流过普通答案：只补换行
+  ▼
+stdout：你好\n
+```
+
+如果模型要求调用工具，Provider 会先完成所有工具片段聚合，Loop 再沿用原有逻辑保存 assistant 消息、串行执行工具、写入 tool 消息并进入下一轮。流式输出没有改变工具执行器、连续错误保险丝、上下文构建或停止原因。
+
+### Loop 中的事件顺序
+
+显式开启流式且 Provider 支持时，一次纯文本回答的事件严格是：
+
+```text
+turn_started
+assistant_delta（每个非空文本片段一次）
+assistant_responded
+run_completed
+```
+
+`assistant_delta` 是即时展示事件，`assistant_responded` 是完整响应已经确定的摘要事件。二者承担不同职责，不能相互替代。
+
+## 四、SSE 解析：先处理字节，再处理事件
+
+SSE 解析最常见的错误，是假设一次 `reader.read()` 恰好得到一个完整事件。网络没有这种保证：
+
+- 一个事件可能拆在多个字节块里；
+- 多个事件可能合在一个字节块里；
+- 一个多字节 UTF-8 字符也可能跨块；
+- 不同服务可能使用 LF 或 CRLF；
+- 心跳注释和多行 `data:` 都不是模型正文。
+
+D020 在 `src/adapters/model/openai-compatible.ts` 中使用 `response.body.getReader()`，每读到一个字节块就增量解码：
+
+```ts
+buffer += decoder.decode(value, { stream: true });
+```
+
+`{ stream: true }` 让 `TextDecoder` 保留尚未完整的 UTF-8 字节序列，等后续字节到达后再组成字符。读取结束时再调用 `decoder.decode()` 刷新内部状态。
+
+### 4.1 字节分帧不等于事件分帧
+
+解码后的文本先进入 `buffer`，再用空行识别事件边界：
+
+```ts
+/\r?\n\r?\n/
+```
+
+它同时接受：
+
+```text
+data: {...}\n\n
+```
+
+和：
+
+```text
+data: {...}\r\n\r\n
+```
+
+每找到一个边界，就只消费当前完整事件，剩余内容继续留在 buffer。这样，一次 `read()` 交付多少字节都不会改变事件解析结果。
+
+流结束时，如果 buffer 还有非空内容，也会消费最后一个事件。因此末尾 `data: [DONE]` 不依赖额外空行才能被接受。
+
+### 4.2 一个事件里只取 data 行
+
+每个事件按行拆分后，只保留以 `data:` 开头的行，去掉字段前缀，再用换行连接：
+
+```text
+: keep-alive
+data: {"model":"stream-model",
+data: "choices":[{"delta":{"content":"你好"}}]}
+```
+
+其中：
+
+- `: keep-alive` 是注释/心跳，不进入 JSON；
+- 两行 `data:` 按 SSE 规则以 `\n` 连接；
+- 连接后的文本才交给 `JSON.parse()`；
+- 空 data 与 `[DONE]` 是控制信息，不作为 JSON 解析。
+
+这避免了两个极端：把整段 SSE 当 JSON，或只取第一条 `data:` 而丢掉其余内容。
+
+### 4.3 文本增量立即交付，最终结果同步聚合
+
+当 `choices[0].delta.content` 是非空字符串时，Provider 同时做两件事：
+
+```text
+最终 text += content
+onDelta(content)
+```
+
+因此测试既能断言回调顺序为 `["你好", "，世界"]`，也能断言最终 `result.text === "你好，世界"`。这里不是等整个 body 结束后重新拆分完整答案模拟流式。
+
+## 五、工具调用为什么必须按 index 聚合
+
+文本 delta 通常按顺序拼接，工具调用却多了一个维度：同一条流中可以交错出现多个调用的片段。
+
+例如：
+
+```text
+index 0：weather，arguments = {"city":
+index 1：time，   arguments = {"zone":
+index 0：arguments = "杭州"}
+index 1：arguments = "UTC"}
+```
+
+如果按到达顺序维护“当前工具”，`index 0` 的后半段参数就可能被拼到 `index 1`。即使每个 JSON 片段都传输正确，最终工具参数仍会损坏。
+
+D020 使用协议里的 `index` 作为聚合键：
+
+```ts
+Map<number, {
+  id: string;
+  name: string;
+  arguments: string;
+}>
+```
+
+每个片段到达时：
+
+1. 读取并校验整数 `index`；
+2. 找到该 index 已有的聚合状态，不存在则创建；
+3. 合并后续可能出现的 `id`、`function.name`；
+4. 将 `function.arguments` **追加**到该调用的参数字符串；
+5. 流结束后按 index 数值排序，生成 `ToolCall[]`。
+
+上述例子最终得到：
+
+```json
+[
+  {
+    "id": "call_weather",
+    "name": "weather",
+    "arguments": "{\"city\":\"杭州\"}"
+  },
+  {
+    "id": "call_time",
+    "name": "time",
+    "arguments": "{\"zone\":\"UTC\"}"
+  }
+]
+```
+
+如果最终缺少 `id` 或 `name`，Provider 抛出 `ModelError`，不会把身份不完整的调用交给 Registry。参数本身的 JSON 解析与 Schema 校验仍由原有 ToolRegistry 负责，职责没有混合。
+
+## 六、末尾 usage 与普通 JSON 回退
+
+### 6.1 用量事件可以没有 choice
+
+请求中的 `stream_options.include_usage: true` 要求兼容服务在流末尾提供用量。此时事件可能是：
+
+```json
+{
+  "model": "stream-model",
+  "choices": [],
+  "usage": {
+    "prompt_tokens": 7,
+    "completion_tokens": 11
+  }
+}
+```
+
+`choices: []` 在这里不代表响应损坏。Provider 先读取 usage，再接受这种末尾事件，并映射为现有领域结构：
 
 ```ts
 {
-  role: 'tool',
-  toolCallId: call.id,
-  name: call.name,
-  content: toolResult.content,
+  inputTokens: 7,
+  outputTokens: 11,
 }
 ```
 
-`toolCallId` 把结果对回那一次调用，`name` 方便日志与回放，`content` 是 Provider 下一轮能看到的内容。
+Loop 继续按原来的方式累计每轮 usage，不需要第二条用量通道。
 
-有一个容易漏掉的细节：`ToolResult.error` 是 Harness 内部的结构化详情，**不会由 Loop 自动序列化进 tool 消息**。因此 FP-07 会分别检查：
+### 6.2 stream: true 不保证服务一定返回 SSE
 
-- Registry 记录的结果中有 `error.code === "COMMAND_CANCELLED"`；
-- 历史最后一条 tool 消息的 JSON `content` 中有 `cancelled: true`。
+部分旧网关或测试 mock 即使收到 `stream: true`，仍会返回 `application/json` 的完整响应。
 
-这两份证据互补，不能混写成一个字段。
+因此 Provider 在 HTTP 成功后检查 `content-type`：
 
-### 2.5 maxConsecutiveToolErrors：防失控保险丝，不是取消原因裁判
+- 包含 `text/event-stream`：进入增量 SSE 读取；
+- 否则：按原有完整 JSON 响应解析文本、工具调用、模型名和 usage。
 
-`src/runtime/loop.ts` 默认把 `maxConsecutiveToolErrors` 设为 3：
+这个回退不是伪造 delta，而是兼容不支持流式响应的网关。它也保留了旧 CLI 工具错误测试的行为：旧测试不需要为了新实现而改写服务器协议。
 
-- 当前工具 `isError === true`，计数加一；
-- 当前工具成功，连续计数清零；
-- 达到上限，发出 `run_completed`，其 `stopReason` 为 `tool_errors`，然后返回。
+## 七、Loop：显式开关，默认不变
 
-它适合回答“工具是否连续失败到不应继续”，却不拥有覆盖外部取消的权力。D017 的 FP-07 故意把上限设为 1，让优先级冲突在最短路径里暴露。
-
-### 2.6 AbortSignal：贯穿 Provider、Loop 与工具的控制信号
-
-同一个 `options.signal` 会传给 Provider 和 `ToolRegistry.execute()`。Loop 还在多个边界主动检查它：
-
-- run 开始前；
-- 每轮 Provider 请求前；
-- 每个工具启动前；
-- 工具结果保存后、连续错误计数前。
-
-`src/tools/run-command.ts` 则监听 `abort`：记录 `cancelled = true`，向子进程发送 `SIGTERM`，等进程关闭后形成结构化结果。
-
-所以取消不是某一层单独完成的。工具负责合作式停止自己的执行，Loop 负责给整个 run 一个一致的最终原因。
-
-## 三、准确的失败时序：工具已取消，run 却报 tool_errors
-
-下面重建 D017 旧实现中的 FP-07。测试位于 `test/d017-failure-paths.test.ts`，关键条件是：
-
-- Provider 第一轮只要求调用一次 `run_command`；
-- 命令先写入 `started` 标记，再保持运行；
-- 测试确认子进程已经启动，随后调用 `AbortController.abort()`；
-- `maxConsecutiveToolErrors` 为 1；
-- 期望整个 run 以 `cancelled` 停止。
-
-### 旧实现的逐步过程
-
-1. Loop 开始第 1 轮，调用 Provider。
-2. Provider 返回 `run_command` 的 tool call；Loop 保存 assistant 消息并发出 `assistant_responded`。
-3. 工具启动前信号尚未取消，于是发出 `tool_call_started`，进入 Registry。
-4. Registry 解析和校验参数，把同一个 signal 交给真实 `run_command`。
-5. 子进程写入 `started` 后，测试触发外部取消。
-6. `run_command` 的 abort 监听器记录取消并发送 `SIGTERM`；子进程关闭后，工具返回：
-   - `isError: true`；
-   - `error.code: "COMMAND_CANCELLED"`；
-   - `content` 中包含 `cancelled: true`、`timedOut: false`。
-7. Loop 发出 `tool_call_finished`，其中 `isError: true`。
-8. Loop 把诊断内容作为 `role: "tool"` 消息写入历史。
-9. **旧代码在这里没有检查 `signal.aborted`。**
-10. 连续错误计数从 0 变成 1，恰好达到上限 1。
-11. Loop 发出 `run_completed`，以 `stopReason: "tool_errors"` 返回，不再请求第二轮 Provider。
-
-压缩成时序就是：
-
-```text
-外部取消
-  → run_command 返回 COMMAND_CANCELLED
-  → tool_call_finished
-  → tool 诊断消息入历史
-  → 连续错误数 = 1
-  → 达到 maxConsecutiveToolErrors = 1
-  → run_completed(tool_errors)       ← 错误的最终解释
-```
-
-D018 的临时旧副本今天再次实际输出：
-
-```text
-beforeExitCode: 1
-actual:   "tool_errors"
-expected: "cancelled"
-pass: 0
-fail: 1
-```
-
-注意，失败的是“整个 run 的停止原因”断言。单次命令已经正确报告了取消；缺陷发生在 Loop 随后的优先级判断。
-
-## 四、准确的修复时序：先保留证据，再服从取消
-
-D017 的最小修复只有三行，位置在 `src/runtime/loop.ts` 的工具消息写入之后：
+`src/runtime/loop.ts` 的 `AgentLoopOptions` 新增：
 
 ```ts
-messages.push({
-  role: 'tool',
-  toolCallId: call.id,
-  name: call.name,
-  content: toolResult.content,
-});
-if (options.signal?.aborted) {
-  return cancelled(turn);
+readonly streaming?: boolean;
+```
+
+选择逻辑只有两种：
+
+```text
+streaming === true 且 provider.streamChat 存在
+  → streamChat，并转发 assistant_delta
+
+其他情况
+  → 原有 chat
+```
+
+这意味着：
+
+| 调用方式 | 实际行为 |
+| --- | --- |
+| 不传 `streaming` | 非流式 `chat()` |
+| `streaming: false` | 非流式 `chat()` |
+| `streaming: true`，Provider 支持 | 真正流式 |
+| `streaming: true`，Provider 不支持 | 回退 `chat()` |
+
+默认值不变是兼容性的关键。原有 embedder、脚本化 Provider 和 Loop 测试不需要了解新展示层，仍然得到相同的消息历史、usage、工具调用和停止原因。
+
+只有 CLI 在 `src/cli/main.ts` 中显式设置 `streaming: true`，没有把“终端想即时显示”变成所有 Loop 调用方的强制行为。
+
+## 八、CLI：实时输出之后，最终答案不能再来一遍
+
+如果终端收到 delta 时立即写出，Loop 结束后再无条件写一次 `result.text`，用户会看到：
+
+```text
+你好你好
+```
+
+D020 在 `src/cli/repl.ts` 中用 `TurnOutput` 描述一轮输出状态：
+
+```ts
+interface TurnOutput {
+  readonly text: string;
+  readonly streamed: boolean;
+  readonly status?: boolean;
 }
-consecutiveToolErrors = toolResult.isError === true ? consecutiveToolErrors + 1 : 0;
 ```
 
-修复后的前八步与旧实现完全相同。区别从第 9 步开始：
+`createTerminalTurn(write)` 为每轮建立独立的终端协调器：
 
-1. 工具结果和 `tool_call_finished` 仍然保留；
-2. tool 消息仍然进入历史；
-3. Loop 发现 `signal.aborted === true`；
-4. `cancelled(turn)` 发出 `run_cancelled`，返回 `stopReason: "cancelled"`；
-5. 不再累加连续错误，不执行保险丝判断，也不再请求 Provider。
+- 收到 `assistant_delta` 就立即 `write(event.delta)`；
+- 记录本轮是否出现过流式输出；
+- `complete(text)` 保存 Loop 的最终文本或状态提示。
+
+`writeTurnOutput()` 根据状态完成最后输出：
+
+| 情况 | 完成时写什么 |
+| --- | --- |
+| 普通答案已经有 delta | 只补 `\n` |
+| 普通答案没有任何 delta | 写 `${text}\n` |
+| 已有 delta，但还要报告取消/未收敛 | 换行后写状态提示，再换行 |
+
+第三种情况不能被“最终答案去重”吞掉。例如已经输出“部分回答”，随后任务取消，终端仍应显示：
 
 ```text
-COMMAND_CANCELLED
-  → tool_call_finished
-  → tool 诊断消息入历史
-  → signal.aborted === true
-  → run_cancelled
-  → run.stopReason === "cancelled"   ← 外部意图拥有最终优先级
+部分回答
+任务已取消。
 ```
 
-修复后，单次工具结果仍可以是 `COMMAND_CANCELLED`。它不是被吞掉，而是不再越权决定整个 run 的停止原因。
+`cancelled`、`tool_errors` 和 `max_turns` 都使用状态输出语义。普通完成答案才去重，状态提示必须保留。
 
-### 为什么必须在工具结果入历史之后？
+一次性命令与 REPL 共用这套规则；`runTurn` 仍兼容返回 `Promise<string>` 的旧测试和调用方。
 
-因为取消不应抹掉刚刚发生的事实。
+### Logger 为什么不刷屏
 
-先保存结果，调用方才能看到：
-
-- 哪次工具调用被取消；
-- 工具是否已经返回诊断；
-- 命令内容里是否明确记录 `cancelled: true`；
-- `tool_call_finished` 与最终 `run_cancelled` 如何衔接。
-
-FP-07 明确断言最后一条历史仍是 tool 消息。若把检查挪到 `messages.push()` 之前，虽然最终停止原因可能也是 `cancelled`，却会丢失这次调用的结果证据，历史也可能停在只有 tool call、没有对应 tool 结果的 assistant 消息上。
-
-### 为什么必须在连续错误保险丝之前？
-
-因为保险丝一旦触发就会立即返回。把取消检查放到它后面，等于没有修复本次缺陷。
-
-先检查信号是在明确一条规则：**外部取消是 run 级控制意图，优先级高于“模型连续犯错是否还能继续”的容错策略。** 用户已经要求停止，就不应再把这次取消当成一次可回喂、可重试的普通失败。
-
-### 为什么检查 signal，而不是特判 COMMAND_CANCELLED？
-
-`AbortSignal` 才是外部意图的来源，错误码只是某个工具对取消的报告方式。
-
-直接检查 signal 可以同时覆盖：
-
-- 工具返回 `COMMAND_CANCELLED` 的路径；
-- 某工具不支持取消、但在信号触发后返回其他结果的路径；
-- 未来新增工具，而不要求每个工具都发明同一种取消错误码。
-
-工具启动前的检查无法覆盖“执行期间才取消”，Provider 请求时的 `ModelCancelledError` 也无法覆盖工具阶段。因此，工具 `await` 返回后的这次检查是独立且必要的边界。
-
-## 五、D018 如何把一次修复变成可执行回放
-
-D017 是真实缺陷测试与最小修复的提交；D018 是之后建立的**确定性工具回放**。不要倒写成“D017 当时由一个真实模型自主发现了问题”。回放的价值在于：今天仍可用真实代码和真实工具核验这条修复路径，而不是只读一段事后叙述。
-
-### 5.1 两层 Loop，两个停止原因
+CLI 将同一个 Loop 事件分别交给 logger sink 和 terminal sink：
 
 ```text
-外层：当前仓库中已经修复的生产 Loop
-  Provider：scripted-d018，五个确定性响应
-  Registry：真实 read_file / run_command / edit_file
-  工作区：系统临时目录中的仓库副本
-    │
-    └─ 内层：副本中的 node:test 回归测试
-         Provider：scripted-d018-regression
-         工具：副本中的真实 run_command
-         动作：启动子进程 → 等待 started → abort
-         断言：副本 run 必须 cancelled，而不是 tool_errors
+assistant_delta
+  ├─ terminal sink：立即写出
+  └─ logger sink：不匹配摘要事件，不写日志
 ```
 
-内层的 `cancelled` 描述“被修复项目中的取消测试”；外层最终的 `completed` 描述“读取、测试、编辑、复测的修复流程走完”。二者处于不同层级，不矛盾。
+现有 logger 继续记录 `turn_started`、`assistant_responded`、工具事件和完成事件。测试明确连续发出两个 `assistant_delta` 后，日志行仍为空。
 
-外层把 `maxConsecutiveToolErrors` 设为 3，使第一次回归测试失败形成的 `COMMAND_FAILED` 能作为反馈进入历史，而不是立刻熔断外层。内层仍设为 1，准确重建缺陷触发条件。
+这里没有把 delta 改成 debug 日志，也没有按字符记录 latency；逐 token 日志既吵，又可能把用户正文重复写入日志系统。
 
-### 5.2 五轮修复过程
+## 九、取消、超时与错误不是同一件事
 
-| 外层轮次 | Provider 动作 | 真实工具结果 | 在教学闭环中的意义 |
-| --- | --- | --- | --- |
-| 1 | `read_file("src/runtime/loop.ts")` | 成功 | 读取临时副本中的真实旧源码 |
-| 2 | 运行 `node --test regression.test.ts` | `COMMAND_FAILED`，退出码 1 | 先取得缺陷版 RED，不跳过失败证据 |
-| 3 | `edit_file` 补回取消检查 | 成功，唯一匹配并返回 diff | 只做三行精确修复，不重写整份文件 |
-| 4 | 再运行完全相同的测试 | 成功，退出码 0 | 同一回归测试由红变绿 |
-| 5 | 返回最终文本 | 无工具调用 | 外层以 `completed` 正常结束 |
+流式请求有两个容易混淆的等待阶段：
 
-临时副本由 `scripts/d018-real-repair.ts` 创建：复制当前 `src/`，写入最小 `package.json` 和回归测试，再只在副本的 `loop.ts` 中移除 D017 的三行检查。它不复制 `.git`、`node_modules`、`.env` 或凭证，也不运行 `npm install`。
+1. `fetch()` 等待响应头；
+2. `reader.read()` 持续等待响应体。
 
-脚本和 `test/d018-real-repair.test.ts` 还会共同核验：
+D020 在两个阶段都保留错误分层。
 
-- 修复前退出码为 1，输出同时包含实际 `tool_errors` 和期望 `cancelled`；
-- 修复后退出码为 0，`pass: 1`、`fail: 0`；
-- 修复后的副本逐字等于当前生产 `src/runtime/loop.ts`；
-- Demo 前后生产源码保持不变；
-- 外层历史严格是 read、修复前测试、edit、修复后测试、final 的 9 条 assistant/tool 记录；
-- 外层共 5 turns、5 次 Provider 请求，最后事件为 `run_completed:5:completed`；
-- 临时根目录已在 `finally` 中删除。
+### 9.1 外部取消
 
-这份闭环不是一句 `success: true`，而是一组可以被脚本和测试同时反驳的断言。
+外部取消来自调用方的 `AbortSignal`，例如 CLI 收到 SIGINT：
 
-## 六、亲手复现：三条命令就够了
+- 请求发出前已经取消：直接抛 `ModelCancelledError`，不调用 fetch；
+- fetch 期间外部取消：归一为 `ModelCancelledError`；
+- 响应体读取期间外部取消：同样归一为 `ModelCancelledError`；
+- Loop 捕获该类型后，沿用原有 `cancelled(turn)`，发出 `run_cancelled` 并返回 `stopReason: "cancelled"`。
 
-需要 Node.js 22 或更高版本，并已安装仓库开发依赖。在 D019 分支的仓库根目录依次运行：
+外部取消是控制意图，不是模型服务故障。
+
+### 9.2 Provider 内部超时
+
+Provider 使用：
+
+```ts
+AbortSignal.any([
+  AbortSignal.timeout(timeoutMs),
+  externalSignal,
+])
+```
+
+将内部超时与外部信号合并给 fetch。若内部计时器导致请求或流读取失败，而外部 signal 没有取消，则对外是 `ModelError`，并保留原始 `cause`。
+
+这保证调用方可以把“用户取消”与“服务等待超时”分开处理，同时仍能从 cause 诊断底层原因。
+
+### 9.3 其他故障
+
+| 故障 | 对外表达 |
+| --- | --- |
+| 网络连接失败、响应体读取异常 | `ModelError`，保留 cause |
+| HTTP 非成功 | `ModelError`，保留 HTTP `status` |
+| data 不是合法 JSON | `ModelError`，保留解析 cause |
+| 缺少必要字段、字段类型错误、工具调用缺 id/name | `ModelError` |
+| 外部取消 | `ModelCancelledError` |
+| 内部超时 | 带原始 cause 的 `ModelError` |
+
+已经形成的 `ModelError` 在流读取 catch 中原样抛出，不会被重复包装成难以定位的另一种错误。
+
+## 十、严格 TDD：每组行为先看 RED，再做最小实现
+
+D020 没有先写完整实现再补测试。每组生产行为都先建立会失败的测试，实际观察预期 RED，再实现到 GREEN，最后跑旧测试防止回归。
+
+| 测试组 | 先看到的代表性 RED | 最小实现后的 GREEN |
+| --- | --- | --- |
+| Provider 文本流 | `streamChat` 不存在 | `stream: true`，delta 顺序与最终聚合一致 |
+| SSE 分帧 | 仅按 `\n\n` 解析，CRLF/任意字节边界失败 | 增量 TextDecoder + LF/CRLF 事件边界 |
+| 工具聚合 | 流式工具调用被忽略或无法交错拼接 | 按 index 保存片段并排序输出 |
+| 末尾 usage | `choices: []` 被当成缺 choices | 接受带 usage 的空 choices 事件 |
+| 工具定义与错误 | 流式请求未下发 tools，网络错误未归一 | 保留 tools 线格式，统一 `ModelError` |
+| 取消与超时 | 请求前取消仍发请求，body 阶段语义不成立 | 两阶段区分外部取消与内部超时 |
+| Loop 流式 | 仍只调用 `chat()`，没有 `assistant_delta` | 可选 streaming + 能力检测 + 非流式回退 |
+| REPL 去重 | 终端协调器不存在，最终答案重复 | `TurnOutput` 与统一完成输出 |
+| 状态提示 | 曾有 delta 后取消提示被去重吞掉 | `status: true` 保留取消/未收敛提示 |
+| CLI 全链路 | 子进程按 JSON 解析 SSE，退出码为 1 | 本地 SSE 经 Provider → Loop → CLI 全链路通过 |
+
+全量旧测试还暴露了一个重要兼容问题：旧工具错误 CLI mock 收到 `stream: true` 后仍返回普通 JSON。修复方式不是修改旧测试，而是增加非 SSE 成功响应的 JSON 回退。
+
+这就是保留旧测试的价值：新功能不仅要让自己的测试变绿，也不能悄悄改变旧契约。
+
+## 十一、测试地图与本地 CLI 实测
+
+### 11.1 新增测试分别证明什么
+
+| 文件 | 覆盖重点 |
+| --- | --- |
+| `test/d020-streaming.test.ts` | 9 条 Provider 测试：真实增量、任意字节边界、CRLF、注释、多行 data、DONE、工具交错聚合、末尾 usage、tools、网络/HTTP/取消/超时 |
+| `test/d020-loop-streaming.test.ts` | 3 条 Loop 测试：显式流式事件序列、默认关闭、无能力回退 |
+| `test/d020-cli.test.ts` | 1 条真实子进程 + 本地 HTTP SSE 全链路测试 |
+| `test/repl.test.ts` | 保留旧测试，并增加普通答案去重、无 delta 回退、状态提示不被吞 |
+| `test/events.test.ts` | 验证 logger 不为 `assistant_delta` 逐条写日志 |
+
+Provider 单元测试使用假的 `fetchImpl` 与内存 `ReadableStream`，不依赖公网。
+
+### 11.2 CLI 全链路测试不是直接调用 terminal helper
+
+`test/d020-cli.test.ts` 启动了真正的本地 HTTP 服务，只监听 `127.0.0.1` 的随机端口。服务分两次写出文本“你”和“好”，随后发送 `[DONE]`。
+
+测试随后：
+
+1. 在系统临时目录创建空工作目录；
+2. 直接用当前 Node.js 可执行文件启动 `src/cli/main.ts` 子进程；
+3. 注入仅用于本地测试的 `PA_MODEL_*` 环境变量和假密钥 `local-test-only`；
+4. 让请求经过真实 CLI 配置、Loop、Provider、HTTP、SSE 和 stdout；
+5. 在结束后关闭服务器并删除临时目录。
+
+实际断言是：
+
+```text
+exitCode = 0
+stdout   = "你好\n"
+stderr   = ""
+请求数   = 1
+请求体包含 stream: true
+```
+
+stdout 不是 `你好好\n`，也不是 `你好\n你好\n`。这证明增量已经写出，最终答案没有重复。
+
+子进程没有通过 `npm run dev` 启动，因此不会触发该脚本中的 `.env` 加载；空临时 cwd 也不存在项目配置文件。D020 测试没有读取真实 `.env` 或真实凭证。
+
+## 十二、配置与运行
+
+要求 Node.js 22 或更高版本。安装开发依赖后，在仓库根目录运行：
 
 ```bash
-npm run demo:d018
 npm run check
 npm run test:coverage
 ```
 
-### 6.1 Demo 应该看什么
-
-`npm run demo:d018` 会输出 JSON。本文不粘贴完整 JSON、整份 `loop.ts` 或完整测试报告，只列出本次实际运行应重点核验的字段：
-
-| 证据 | 本次实际结果 |
-| --- | --- |
-| `beforeExitCode` | **1** |
-| `beforeStdout` | 包含 **pass 0 / fail 1**，以及 actual `tool_errors`、expected `cancelled` |
-| `afterExitCode` | **0** |
-| `afterStdout` | 包含 **pass 1 / fail 0** |
-| 外层工具序列 | read 成功 → 首次测试 `COMMAND_FAILED` → edit 成功 → 复测成功 |
-| 外层完成状态 | `completed`，**5 turns / 5 requests** |
-| `lastEvent` | `run_completed:5:completed` |
-| `productionLoopUnchanged` | **true** |
-| `tempRemoved` | **true** |
-
-修复前的非零退出码是被测旧副本的预期证据，不是 Demo 自身失败。整个 `npm run demo:d018` 在证据全部满足后以 0 退出；若先红、后绿、文件一致或生产源码不变任一条件被破坏，脚本会主动失败。
-
-### 6.2 本次完整验证结果
-
-| 命令 | 实际通过结果 |
-| --- | --- |
-| `npm run demo:d018` | 旧副本回归失败、修复后通过；外层 `completed / 5 turns / 5 requests`，临时目录已清理 |
-| `npm run check` | ESLint、`tsc --noEmit` 和全量 Vitest 均通过 |
-| 全量测试 | **19 个文件、171 项测试通过，0 失败** |
-| `npm run test:coverage` | 同样 **19/19 文件、171/171 测试通过** |
-
-本次 V8 覆盖率实测为：
-
-| Statements | Branches | Functions | Lines | `src/runtime/loop.ts` |
-| --- | --- | --- | --- | --- |
-| 96.61% | 91.72% | 98.07% | 97.89% | 语句 / 分支 / 函数 / 行均 100% |
-
-这些数字只描述当前仓库、当前测试集合的本次运行，不是性能测试，也不是真实模型成功率。命令输出中只有本机 npm 关于未知 `home` 配置的既有 warning，没有测试失败、类型错误或 ESLint 错误。
-
-## 七、读者练习：把“看懂”变成“能推翻”
-
-### 练习 1：只跑 FP-07，写出你自己的事件顺序
+只跑 D020 及相关回归测试：
 
 ```bash
-npx vitest run test/d017-failure-paths.test.ts -t "FP-07"
+npm test -- \
+  test/d020-streaming.test.ts \
+  test/d020-loop-streaming.test.ts \
+  test/d020-cli.test.ts \
+  test/repl.test.ts \
+  test/events.test.ts
 ```
 
-不要只看最后的通过标记。回到测试源码，找出以下断言各自排除了什么错误解释：
+### 12.1 模型配置
 
-- `requests` 长度为 1；
-- Registry 结果仍为 `COMMAND_CANCELLED`；
-- 最后一条历史仍为 tool 消息；
-- 最后事件为 `run_cancelled`；
-- 事件中不存在 `run_completed(tool_errors)`。
+CLI 支持 `agent.config.json` 和环境变量，环境变量优先。与本次流式请求直接相关的变量是：
 
-目标：能不看本文，独立画出失败与修复两条时序。
+| 环境变量 | 含义 |
+| --- | --- |
+| `PA_MODEL_PROVIDER` | 当前 CLI 使用 `openai-compatible` |
+| `PA_MODEL_BASE_URL` | OpenAI-compatible 的 `/v1` 基础地址 |
+| `PA_MODEL_API_KEY` | API 密钥，只从环境变量读取 |
+| `PA_MODEL_NAME` | 请求中的模型名 |
+| `PA_LOG_LEVEL` | `debug` / `info` / `warn` / `error` |
+| `PA_WORKSPACE` | 工具允许访问的工作区根目录 |
 
-### 练习 2：为什么把错误上限从 1 调成 2 不是修复？
+一次性命令示例：
 
-在旧实现里，第一次 `COMMAND_CANCELLED` 不再立刻触发保险丝，Loop 会进入第 2 轮，并在轮首取消检查处返回 `cancelled`。
-
-如果只看 `stopReason`，缺陷似乎消失了；但 `turns` 会从期望的 1 变成 2，还多走了一次轮次边界。这说明调高阈值只是推迟或遮蔽冲突，没有建立“工具结果后立即服从取消”的规则。
-
-目标：解释“让某个测试变绿”和“修正语义”有什么区别。
-
-### 练习 3：在自己的临时实验副本中挪动三行检查
-
-分别预测、再验证：
-
-1. 移到 tool 消息入历史之前：哪条历史断言会失败？
-2. 移到连续错误保险丝之后：为什么又得到 `tool_errors`？
-3. 删除检查后，D018 的哪个字段首先证明旧副本仍然是红的？
-
-不要直接改本课程分支的生产文件；用临时副本做实验即可。
-
-目标：理解代码位置本身就是语义，而不只是风格。
-
-### 练习 4：设计一个“工具成功，但信号已取消”的场景
-
-让假工具在 `abort()` 后返回 `isError: false` 的结果。根据当前实现推断：
-
-- tool 消息是否保留；
-- 连续错误计数是否重要；
-- 整个 run 应该返回什么停止原因。
-
-目标：证明当前修复依赖的是 `AbortSignal`，不是对 `COMMAND_CANCELLED` 的字符串特判。
-
-### 练习 5：审计 Demo，而不是复述 Demo
-
-运行 `npm run demo:d018`，尝试找出至少四个独立字段，分别证明：
-
-- 旧缺陷确实出现；
-- 修复确实由精确编辑完成；
-- 当前生产源码没有被改坏；
-- 临时目录没有遗留。
-
-目标：把“程序说成功”改写成“哪些证据使失败解释无法成立”。
-
-## 八、常见误区
-
-### 误区 1：`isError: true` 就应该立刻抛异常
-
-不一定。文件不存在、命令非零退出等可以成为 Provider 下一轮的反馈。真正需要防止的是无限失败，所以才有连续错误保险丝。Provider 故障和外部取消则走各自不同的语义通道。
-
-### 误区 2：`COMMAND_CANCELLED` 和 `cancelled` 是重复状态，可以删掉一个
-
-它们描述不同层级：前者说明一次命令如何结束，后者说明整个 run 为什么停止。保留工具诊断，同时让 run 服从外部取消，才是完整证据。
-
-### 误区 3：取消后无需保留 tool 消息，反正不会再问模型
-
-消息历史不仅服务下一次 Provider 请求，也服务调用方诊断、事件关联和回放。取消不应把已发生的工具结果从历史中抹掉。
-
-### 误区 4：把 maxConsecutiveToolErrors 调大就能解决取消问题
-
-这只能改变保险丝何时触发，不能表达取消优先级，还可能引入额外轮次或别的停止原因。正确修复是调整判断顺序，而不是绕开触发条件。
-
-### 误区 5：外层 completed 与内层 cancelled 相互矛盾
-
-外层是修复流程，内层是被修复项目的取消回归。阅读任何 Agent 报告都要先问：这个状态属于哪一层、哪一个 run？
-
-### 误区 6：Demo 跑通就证明真实模型能自主修复
-
-D018 的动作序列由脚本预先给定。它证明真实 Loop、Registry、文件/命令/编辑工具和测试证据可以闭环，不证明真实模型会独立选择同样动作。
-
-### 误区 7：100% 的 loop.ts 覆盖率代表所有系统语义都已证明
-
-覆盖率说明执行过哪些代码，不等于覆盖所有时序、工具、并行场景或真实 Provider。FP-07 的价值恰恰在于一个具体的时序断言，而不是单纯提高百分比。
-
-## 九、能力边界与不做的事情
-
-- **脚本化 Provider 不等于真实模型。** 本次 Demo 不调用真实 ARK，不声称 ARK 修复成功，也不给出模型成功率、时延或性能数据。
-- **临时副本不等于安全沙箱。** `run_command` 通过本机系统 shell 执行命令；Demo 只运行固定的 Node 回归测试和可取消子进程，不执行任意外部输入。临时目录用于隔离文件修改，不提供权限隔离、网络隔离或资源隔离。
-- **取消是协作式的。** Provider 和工具需要响应 signal，Loop 在边界检查 signal；本实现不承诺强行中断一个永远不返回、也不监听取消的任意工具。
-- **单次回归不等于通用修复能力。** 本文没有新增并行工具、自动重试、通用修复规划或所有取消路径的证明。相关失败语义仍由 D017 矩阵与既有测试共同支撑。
-- **没有已制作视频。** 本日交付只有长文和已有可执行 Demo，不提供虚构视频链接、观看量或学习数据。
-- **没有外部事故叙事。** 不创建 GitHub issue，不虚构用户反馈、发布量或线上影响。
-
-## 十、D019 的 TDD 说明
-
-D019 只修改这份教学 README，**没有生产代码变更，因此没有本日新增的 RED，也不伪造一次 RED/GREEN 过程**。
-
-文中出现的 RED 有两类明确来源：
-
-1. D017 旧实现中 FP-07 的真实语义失败：实际 `tool_errors`，期望 `cancelled`；
-2. D018 在临时副本中重新注入旧缺陷后，可重复运行的修复前失败与修复后通过。
-
-本日运行的 `npm run check` 和 `npm run test:coverage` 是对既有代码与文档所依据事实的回归验证，不冒充新功能测试。
-
-## 结语：闭环不是“最后绿了”这么简单
-
-一次可信的 Agent 修复，不只是把失败测试变成通过测试。它还要保留一条能够审计的因果链：
-
-```text
-失败被分类
-  → 最小场景可重复
-  → 工具结果成为证据
-  → 外部取消不被保险丝覆盖
-  → 最小修复通过同一回归
-  → 历史、事件、文件和清理状态互相印证
-  → 证据边界仍然清楚
+```bash
+PA_MODEL_BASE_URL="https://你的兼容服务/v1" \
+PA_MODEL_API_KEY="替换为你的密钥" \
+PA_MODEL_NAME="替换为模型名" \
+npm run dev -- "用一句话介绍流式输出"
 ```
 
-这就是本例最重要的设计原则：**让错误成为可处理的数据，让取消保持控制优先级，让每一次“修好了”都有可以被重新运行和反驳的证据。**
+不带提示词时进入 REPL，输入 `/exit` 退出：
+
+```bash
+npm run dev
+```
+
+`npm run dev` 使用 `node --env-file-if-exists=.env`，所以如果项目根目录存在 `.env`，它会按 Node.js 规则加载。**不要把真实密钥写进 README、测试或提交。**
+
+CLI 已固定开启 `streaming: true`。使用其他 Provider 嵌入 Loop 时，是否开启由调用方决定；Provider 没有 `streamChat` 时会自动回退。
+
+## 十三、本次最终实测结果
+
+在 D020 分支完成实现后，连续执行：
+
+```bash
+npm run check && npm run test:coverage
+```
+
+两条命令均成功：
+
+| 项目 | 实测结果 |
+| --- | --- |
+| ESLint | 通过 |
+| TypeScript `tsc --noEmit` | 通过 |
+| 全量 Vitest | **22 个测试文件，188 项测试全部通过** |
+| 覆盖率运行 | 同样 **22 / 22 文件、188 / 188 测试通过** |
+| Statements | **94.98%** |
+| Branches | **89.45%** |
+| Functions | **98.29%** |
+| Lines | **95.92%** |
+
+覆盖率配置包含 `src/**/*.ts`，排除 CLI 入口 `src/cli/main.ts`，阈值为 statements/lines/functions 80、branches 75。本次结果高于既有阈值；`src/runtime/loop.ts` 的语句、分支、函数和行覆盖率均为 100%。
+
+本日没有新增运行时依赖，`package.json` 的 dependencies 仍为空；测试和覆盖率使用仓库已有开发依赖。
+
+## 十四、验证边界：这次没有调用真实 ARK
+
+必须明确区分“代码路径是真实的”和“接入了真实模型服务”。
+
+本次已经真实执行的是：
+
+- TypeScript 生产代码；
+- Provider 的增量 reader、TextDecoder 和 SSE 解析；
+- Loop 的选择、事件与工具编排；
+- CLI 子进程和终端输出；
+- 本地 `127.0.0.1` HTTP 服务上的真实网络请求；
+- lint、typecheck、全量测试和 V8 覆盖率。
+
+本次没有执行的是：
+
+- 没有调用真实 ARK；
+- 没有使用真实 ARK API Key；
+- 没有访问公网模型服务；
+- 没有验证某个具体 ARK 模型的 SSE 字段变体、首 token 延迟、吞吐、稳定性或工具调用成功率；
+- 没有把本地 mock 的通过包装成线上兼容性结论。
+
+因此，今天可以下的结论是：**在本仓库定义并测试的 OpenAI-compatible SSE 协议形状下，从本地 HTTP 服务到 CLI stdout 的流式链路已经闭环，旧测试保持通过。**
+
+真实 ARK 或其他兼容服务是否完全符合这些协议细节，仍需在获得明确授权、独立测试凭证和允许联网的环境中另行验证。覆盖率衡量的是代码被执行的范围，不是外部服务兼容性的概率。
+
+## 十五、D020 的最终契约
+
+今天完成后，可以用下面这组不变量检查实现是否仍然健康：
+
+1. `chat()` 旧契约保留，`streamChat` 是可选能力。
+2. 流式请求明确发送 `stream: true`，工具定义不丢失。
+3. 文本在响应体尚未结束时就能逐段到达终端。
+4. 任意网络字节边界不改变 SSE 解析结果。
+5. 工具参数按协议 index 聚合，交错到达也不会串线。
+6. 末尾 usage 回到原有 `ChatResult`，Loop 继续累计。
+7. Loop 默认非流式；显式开启但能力不足时回退。
+8. 普通最终答案不重复，取消和未收敛状态不被吞。
+9. 外部取消、内部超时、网络/HTTP/协议错误保持不同语义。
+10. logger 不逐 delta 刷屏，完整消息历史仍是后续工具循环的依据。
+11. 不支持 SSE 的旧网关仍可返回完整 JSON。
+12. 本地 mock 全绿不等于真实 ARK 已验证。
+
+**流式输出的价值不是让字符动起来，而是在不破坏 Agent 编排契约的前提下，让已经到达的信息立刻对人可见。**

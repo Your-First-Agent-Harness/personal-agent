@@ -16,6 +16,7 @@ export interface AgentLoopOptions {
   readonly workspaceRoot: string;
   readonly eventSink?: EventSink;
   readonly signal?: AbortSignal;
+  readonly streaming?: boolean;
 }
 
 export type StopReason = AgentStopReason;
@@ -60,14 +61,21 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     }
 
     const requestMessages = buildContext(messages, options.maxContextChars ?? 24_000);
+    const request = {
+      messages: requestMessages,
+      maxTokens: options.maxTokens,
+      tools,
+      signal: options.signal,
+    };
     let result: ChatResult;
     try {
-      result = await options.provider.chat({
-        messages: requestMessages,
-        maxTokens: options.maxTokens,
-        tools,
-        signal: options.signal,
-      });
+      if (options.streaming === true && options.provider.streamChat !== undefined) {
+        result = await options.provider.streamChat(request, (delta) => {
+          options.eventSink?.emit({ type: 'assistant_delta', turn, delta });
+        });
+      } else {
+        result = await options.provider.chat(request);
+      }
     } catch (error) {
       if (error instanceof ModelCancelledError) {
         return cancelled(turn);

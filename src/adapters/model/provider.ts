@@ -35,4 +35,5 @@ export interface ChatResult {
 export interface ModelProvider {
   readonly name: string;
   chat(request: ChatRequest): Promise<ChatResult>;
+  streamChat?(request: ChatRequest, onDelta: (delta: string) => void): Promise<ChatResult>;
 }

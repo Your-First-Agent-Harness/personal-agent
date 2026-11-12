@@ -2,6 +2,7 @@ export type AgentStopReason = 'completed' | 'max_turns' | 'cancelled' | 'tool_er
 
 export type AgentEvent =
   | { readonly type: 'turn_started'; readonly turn: number; readonly messageCount: number }
+  | { readonly type: 'assistant_delta'; readonly turn: number; readonly delta: string }
   | {
       readonly type: 'assistant_responded';
       readonly turn: number;
