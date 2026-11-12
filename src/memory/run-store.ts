@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
+import type { Message, MessageRole } from '../core/message.ts';
 import type { AgentLoopResult, StopReason } from '../runtime/loop.ts';
 
 export type RunStatus = 'running' | 'completed' | 'interrupted' | 'failed';
@@ -47,12 +48,60 @@ function isStopReason(value: unknown): value is StopReason {
   return value === 'completed' || value === 'max_turns' || value === 'cancelled' || value === 'tool_errors';
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isMessageRole(value: unknown): value is MessageRole {
+  return value === 'system' || value === 'user' || value === 'assistant' || value === 'tool';
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function isToolCall(value: unknown): boolean {
+  return isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.arguments === 'string';
+}
+
+function isMessage(value: unknown): value is Message {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return isMessageRole(value.role) &&
+    typeof value.content === 'string' &&
+    (value.toolCalls === undefined ||
+      (Array.isArray(value.toolCalls) && value.toolCalls.every(isToolCall))) &&
+    (value.toolCallId === undefined || typeof value.toolCallId === 'string') &&
+    (value.name === undefined || typeof value.name === 'string');
+}
+
+function isAgentLoopResult(value: unknown): value is AgentLoopResult {
+  return isRecord(value) &&
+    Array.isArray(value.messages) &&
+    value.messages.every(isMessage) &&
+    typeof value.text === 'string' &&
+    isNonNegativeInteger(value.turns) &&
+    isStopReason(value.stopReason) &&
+    isRecord(value.usage) &&
+    isNonNegativeInteger(value.usage.inputTokens) &&
+    isNonNegativeInteger(value.usage.outputTokens);
+}
+
 function parseResult(json: string): AgentLoopResult {
+  let value: unknown;
   try {
-    return JSON.parse(json) as AgentLoopResult;
+    value = JSON.parse(json) as unknown;
   } catch (error) {
     throw new RunStoreError('Run 完成结果数据损坏', { cause: error });
   }
+  if (!isAgentLoopResult(value)) {
+    throw new RunStoreError('Run 完成结果数据损坏');
+  }
+  return value;
 }
 
 function toRunRecord(row: Record<string, unknown>): RunRecord {
