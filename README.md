@@ -1,341 +1,206 @@
-# D044｜安全加固：工具白名单、资源限制、审计日志
+# D045｜安全架构评审：攻击面、信任边界与纵深防御
 
-这一天把 D043 的“进程生命周期防护”推进为**默认拒绝的命令安全边界**：只有精确白名单中的可执行文件和完整 argv 才能执行；子进程永远不经过 shell；运行时间、输出字节、并发与队列都有上限；允许、拒绝和完成结果进入独立 JSONL 审计。
+这一天不新增工具或安全功能，而是把 D028–D044 放回同一张架构图中，回答三个问题：**模型和外部内容不可信时，哪些能力默认可达？已有控制究竟证明什么？距离可评审的生产部署还差哪些独立防线？**
 
-> 安全定位：这是应用层的命令准入与资源治理，不是容器、seccomp、Landlock、App Sandbox 或完整操作系统沙箱。D043 的开放式 `sandboxed_command` 为兼容而保留，但不能被当作安全命令白名单使用。新 Demo 只使用本日的 `secure_command`。
+本日交付一份静态安全架构评审、一套带讲师稿和完整答案的精炼课程，以及一份可签署的内部评审清单。所有结论区分代码与测试证据、文档建议、D046 待实证和未解决项；不把模块名称、Demo 或测试总数冒充安全认证。
 
-配套精炼课程：[`docs/d044-security-course.md`](docs/d044-security-course.md)。
+## 1. 交付物与阅读路径
 
-## 1. 运行与验收
+| 文档 | 用途 | 适合读者 |
+| --- | --- | --- |
+| [安全架构评审报告](docs/d045-security-architecture-review.md) | 完整攻击面、六类信任边界、20 项风险矩阵、攻击链、处置和 D046 实证计划 | 维护者、安全架构师、平台负责人 |
+| [安全架构精炼课程](docs/d045-security-course.md) | 100 分钟讲师稿、12 个练习及完整答案，训练评审方法 | 工程师、内部培训组织者、自学者 |
+| [安全评审检查清单](docs/d045-security-review-checklist.md) | 默认配置、身份、文件、命令、网络、MCP、审计、隐私、回归和签署门槛 | 正式评审与发布审批人员 |
+| 本 README | 结论摘要、证据边界、复跑方式与当前验收记录 | 所有读者 |
 
-要求 Node.js 24+。实现使用原生 TypeScript ESM、Vitest 和 Node 内置模块，**没有新增运行时依赖**，Demo 不访问外网。
+建议先用 10 分钟读本 README，再按职责阅读：
+
+- **做架构决策**：评审报告第 2、4、6、7、9 节。
+- **做代码修复**：风险矩阵中对应 ID、证据文件和 D046 实验判据。
+- **做内部培训**：课程按讲授与练习交替进行；答案不代表攻击实验已经执行。
+- **做上线审批**：逐项填写检查清单，不允许仅凭本文档完成就勾选控制项。
+
+## 2. 一句话结论
+
+**当前项目适合可信、本机、单用户的教学与开发；不应把默认 CLI 直接暴露给不可信用户、不可信仓库或不可信 MCP，也不能宣称已有多租户生产隔离。**
+
+原因不是“所有代码都不安全”，而是已有局部控制没有自动组成默认全局策略：
+
+- D029 有 allowedTools、tenant、tool/action 和 sensitive 确认，但默认 CLI Registry 没有配置这些选项。
+- 默认内置工具包含 `run_command`，其 `shell:true` 可执行模型给出的命令字符串。
+- 普通文件工具的 workspace 检查是词法 `path.resolve + startsWith`，不是符号链接/TOCTOU 防线。
+- 工具结果会原样回到模型；文件、知识库和 MCP 文本都可能成为间接提示注入载体。
+- Provider、MCP 和普通工具的资源/信任策略并不一致，不能用 D042 或 D044 的局部加固覆盖全系统。
+- D044 是很强的**应用层命令准入与审计**，但不是容器、系统调用过滤或网络/文件系统沙箱。
+
+因此当前发布建议是：**可信教学场景可有条件使用；不可信或生产场景在 P0 关闭前不通过。** 详见[评审结论](docs/d045-security-architecture-review.md#9-评审结论风险接受与签署建议)。
+
+## 3. 架构攻击面速览
+
+```text
+用户 / 配置 / env
+        │
+        ▼
+      CLI ─────────────────────────────┐
+        │                              │ 默认无 allowedTools / tenant / 敏感确认
+        ▼                              │
+OpenAI-compatible Provider             │
+  可配置 baseUrl + Bearer              │
+        │                              │
+        ▼                              ▼
+    AgentLoop ───── tool call ───► ToolRegistry
+        ▲                              │ Schema 子集 + 可选策略
+        │                              ▼
+        │                       文件 / shell / 多步骤工具链
+        │                              │
+        └──── 原样 ToolResult           ▼
+                                  宿主文件与进程
+        │
+        └──────────────────────► MCP stdio client/server
+                                      │
+                                      ▼
+                             远端描述 / Schema / 结果
+```
+
+评审报告把攻击面拆成六个边界：配置入进程、Provider 入 Loop、Loop 入 Registry、Tool 入 OS、Agent 与 MCP、数据出进程/落盘。每个边界都同时审资产、入口、已有控制和剩余风险，而不是只列模块功能。
+
+## 4. 最高优先级发现
+
+完整 20 项矩阵见[评审报告第 4 节](docs/d045-security-architecture-review.md#4-资产--入口--边界--威胁--控制--剩余风险矩阵)。以下是摘要，不是新增漏洞通告或外部渗透结果。
+
+| ID | 发现 | 评级依据 | 当前处置 |
+| --- | --- | --- | --- |
+| R01 | 默认 CLI 可从模型 tool call 到 open shell，未启用 Registry 白名单/敏感确认 | S4/L3：默认路径可达，影响是当前 OS 用户权限 | 不可信场景禁用默认高风险工具；P0 默认最小权限 |
+| R02 | 文件路径只做词法边界，符号链接与检查/使用竞态未解决 | S3/L2：需链接或替换前提，可越出 workspace | D046 无害实证；长期 dirfd/no-follow 或 OS 沙箱 |
+| R03 | 文件/知识库/MCP 内容可形成间接提示注入，工具结果无信任隔离 | S4/L2：恶意内容现实存在，影响取决于工具权限 | 动作级最小权限、确认、精确命令和 OS/出口防线 |
+| R04/R05 | Provider 可配置出口，缺统一 redirect/私网/超时/响应字节策略 | 秘密泄露需配置控制；恶意响应可影响可用性 | 固定出口、网络策略和本地假服务回归 |
+| R06 | MCP stdout 单帧和未换行累计缓冲无字节上限 | S3/L2：恶意/故障子进程可耗尽单实例内存 | 上限后关闭并 settle pending；D046 有界洪水测试 |
+| R07/R08 | 远程工具元数据不受信；stdio toolNames 不是身份认证 | 恶意 MCP 或错误暴露可扩大权限 | 本地敏感策略、服务审批、父进程/OS 边界 |
+| R09 | D030 韧性可选，普通命令/文件/Provider 没有统一默认预算 | 大文件、死循环、慢响应可耗资源 | 默认超时/字节/并发/磁盘预算，幂等重试 |
+| R10/R11 | D043/D044 均非 OS 沙箱；允许解释器仍有宿主能力 | 高影响，通常需误用或管理员配置 | 文档明示；真正 OS 隔离和可信白名单路径 |
+| R12 | JSONL 审计不防篡改、未显式 chmod 0600，completion 失败不回滚 | 日志泄露/篡改与磁盘故障仍需部署治理 | 集中审计、权限/保留/WORM；明确失败语义 |
+| R14/R15 | tenantId 不是认证；prompt/结果/日志有第三方与隐私边界 | 错误多租户部署或敏感数据接入时成立 | 认证身份映射、数据分类、最小上下文和保留策略 |
+
+S/L 是相对架构优先级，不是 CVSS，也不表示已经发生安全事件。
+
+## 5. 已有控制：可以引用什么证据
+
+| 范围 | 可以说的 | 不能说的 |
+| --- | --- | --- |
+| D028 Schema | 对声明的自有子集做参数校验，有 D028 测试 | “完整 JSON Schema”“未知关键字自动拒绝” |
+| D029 Registry | 同名注册 Schema/执行；allowedTools、tenant、action、sensitive 确认有测试 | “默认 CLI 全启用”“tenantId 已认证”“允许工具即允许所有 argv 安全” |
+| D030 / D032 | 可选 per-tool 超时、重试、限流、熔断、取消；多步骤发布门禁与产物核验 | “所有工具默认可靠”“重试保证无副作用”“多步骤链是事务框架” |
+| Context | 按字符保留 system/最新 user、工具配对与截断 | “精确 token 安全”“能防提示注入” |
+| MCP client / server | 握手版本、ID、通知/坏帧、timeout、关闭与分页控制 | “无限帧有上限”“对端已认证” |
+| D037 Backend | 统一本地/MCP list/read/write 适配 | “这是 realpath 文件安全边界” |
+| MCP 适配 / 集成 / 重连 | 本地 policy/resilience/sensitive 组合、server allowlist、协议集成 | “远端 Schema/result 可信”“内建透明重连”“多租户认证” |
+| D041 Knowledge | 只读快照；加载和查询 realpath，跳过库外链接 | “有安全写入”“实时追踪文件”“正文可信” |
+| D042 Weather | 固定 Open-Meteo HTTPS、数字坐标、禁重定向、timeout、body bytes、字段校验 | “Provider/任意 URL 也有相同保证” |
+| D043 Command | shell 命令的临时 cwd、最小 env、timeout、进程组、输出截断与清理 | “OS 沙箱”“精确 argv”“输出超限杀进程/有审计队列” |
+| D044 Secure Command | 精确 realpath executable + argv、无 shell、资源/队列/取消、fail-closed 审计 | “容器/seccomp/chroot”“解释器无宿主权限”“JSONL 不可篡改” |
+
+D044 的 decision 审计失败会阻止 spawn；completion 失败会显式报错，但已经发生的副作用不能回滚。单实例 JSONL 串行 append 也不等于跨进程协调、fsync、WORM、签名或防宿主篡改。
+
+## 6. 纵深防御目标
+
+```text
+已认证主体
+  → 默认拒绝的 Policy / Registry
+  → 内容来源与动作级确认
+  → 窄业务工具或精确命令规则
+  → 每调用资源预算与幂等语义
+  → OS 文件/进程/网络沙箱
+  → 最小泄露、抗篡改、可告警的集中审计
+```
+
+这是 **[文档建议]**，不是 D045 新增实现。P0 是在不可信输入或真实秘密接入前完成：默认最小工具集、认证主体、文件真实路径边界、Provider/MCP 资源与出口控制、动作级授权和 OS 沙箱。P1 包括集中审计、隐私/供应链门禁和故障/恶意对端验证。
+
+## 7. 评审方法与证据纪律
+
+本日采用以下方法：
+
+1. 从默认入口和公共导出开始，而不是只看安全命名模块。
+2. 将源码行为与对应测试交叉核对，记录控制是否默认启用。
+3. 用 STRIDE 与端到端攻击链审模型、工具、MCP、OS 和第三方边界。
+4. 给严重度/可能性写前提，避免把本地教学项目虚构成远程未认证服务。
+5. 把“已有控制”“剩余风险”“修复/缓解/避免/接受/验证”分别记录。
+6. 所有攻击实验只建议使用临时目录、loopback、无害 canary/marker 和有界数据。
+
+明确证据边界：
+
+- 本日没有改源码、测试、package 或 lockfile，没有新增运行时依赖。
+- 本日没有运行 D046 对抗实验，没有预先伪造 RED/GREEN。
+- 没有外部安全评审、渗透测试、授课、学员反馈或发布签署。
+- `docs/architecture.md` 是早期概览；其中名称不能替代当前源码的安全语义。
+- 现有 505 测试是功能回归基础，不是攻击面覆盖率。
+
+## 8. 复跑与最终验收
+
+要求 Node.js 24+。只读复核：
 
 ```bash
 npm ci
-npm run demo:d044
 npm run check
 npm run test:coverage
+git diff --check
 ```
 
-单独复跑本日测试：
+可单独复跑本评审重点引用的控制：
 
 ```bash
 npx vitest run \
-  test/d044-secure-command.test.ts \
-  test/d044-audit-sink.test.ts \
-  test/d044-demo.test.ts
+  test/d028-schema-validation.test.ts \
+  test/d027-tool-registry.test.ts test/d029-permissions.test.ts \
+  test/d030-resilience.test.ts test/d032-multi-tool-demo.test.ts \
+  test/context.test.ts test/tools.test.ts test/run-command.test.ts \
+  test/write-file.test.ts test/edit-file.test.ts \
+  test/d035-mcp-client.test.ts test/d036-mcp-server.test.ts \
+  test/d036-stdio-integration.test.ts test/d037-mcp-tool.test.ts \
+  test/d037-filesystem-backend.test.ts test/d037-stdio-integration.test.ts \
+  test/d039-reconnect-demo.test.ts \
+  test/d041-knowledge.test.ts test/d042-weather.test.ts \
+  test/d043-sandboxed-command.test.ts \
+  test/d044-secure-command.test.ts test/d044-audit-sink.test.ts test/d044-demo.test.ts
 ```
 
-Demo 每次在系统临时目录创建独立的伪造攻击与审计环境，完成后递归删除该目录。脚本将**本次实际运行**的审计样例写到 `evidence/d044-audit.jsonl`；它是可重复生成的最新样例，不冒充不可变历史归档。用下列命令同时保存终端证据：
+### D045 实际验收记录
 
-```bash
-set -o pipefail
-npm run demo:d044 2>&1 | tee evidence/d044-transcript.txt
-```
+2026-11-12 在本分支最终提交前实际运行，结果如下；没有手工修改测试或覆盖率输出：
 
-任何验收不成立都会非零退出，且不会输出 `D044 Demo PASS`。
-
-## 2. 从既有实现审查出什么
-
-| 既有模块 | 可复用认识 | 本日为什么不能原样充当安全边界 |
-| --- | --- | --- |
-| D029 `ToolRegistry` | 调用入口可执行 `resolvePermission`；权限不足时不进入工具 | 它授权的是工具名/动作，不检查 argv；`secure_command` 被允许后仍需命令级精确白名单 |
-| D043 `sandboxed-command.ts` | 一次性工作目录、超时、进程组终止、有界输出、取消与清理 | 输入是 command string，真实 `spawn(..., { shell: true })`；元字符会被解释，不是安全沙箱 |
-| D030 `resilience.ts` | 并发上限、队列上限、排队超时、AbortSignal 移除等待者 | 通用包装器无法判断命令是否允许，也不负责进程输出字节与审计顺序 |
-| D013 `run-command.ts` | 简单命令工具便于 Agent 调用 | 面向本机开发自动化，不是默认拒绝的不可信命令入口 |
-| logger / EventSink | 常规日志和领域事件便于观察 AgentLoop | 普通日志可能丢字段、含敏感参数或随事件订阅失败；不能替代独立、可持久化的执行审计 |
-
-结论是**新增边界而不是改写旧默认对象**：旧 D043 行为与测试保持兼容，新安全 Demo 不调用旧工具。
-
-## 3. 威胁模型
-
-### 3.1 本日防御的行为
-
-| 威胁 | 防御 | 可复核证据 |
-| --- | --- | --- |
-| 未授权可执行文件 | `realpath` 后的 executable 必须等于白名单规则 | 未白名单 Node 脚本返回 `COMMAND_NOT_ALLOWED` |
-| `;`、`>`、管道、命令替换 | 不拼接 shell 字符串；完整 argv 精确匹配；`shell:false` | 五种元字符测试与 Demo 均在 spawn 前拒绝 |
-| 借允许命令追加危险参数 | argv 长度和每一项都必须完全相等，不用 `startsWith` | 在允许脚本后追加写 marker 参数仍拒绝 |
-| 默认绝对路径写宿主 | 未列入精确规则的脚本/路径不能启动 | marker 不存在，且未创建一次性 cwd |
-| 永久运行 | 每次子进程有 wall timeout，超时杀进程组 | 返回 `COMMAND_TIMEOUT`，审计含 signal/耗时 |
-| stdout/stderr 洪水 | 两路共享 Buffer 字节预算，超限杀进程而不是无限收集 | 返回 `COMMAND_OUTPUT_LIMIT`，保留字节不超过预算 |
-| 并发与无限排队 | `maxConcurrent`、`maxQueue`、`maxQueueWaitMs` | 满载拒绝、排队超时和取消都有测试 |
-| 调用方取消 | 运行中终止进程组；排队中移除 waiter；预取消不 spawn | `COMMAND_CANCELLED` 与 completion 审计 |
-| 审计服务/磁盘故障 | decision 写入失败时 fail-closed，不启动 | `AUDIT_WRITE_FAILED` 且 marker 不存在 |
-| 日志泄露伪造秘密 | 显式敏感值替换、常见键值脱敏、结果输出脱敏、argv SHA-256 | 测试和 Demo JSONL 不含伪造秘密 |
-
-### 3.2 明确不在本日边界内
-
-- 没有 CPU rlimit、内存 rlimit、cgroup、job object 或配额统计；没有运行 OOM、fork bomb，也不展示伪造 CPU/内存指标。
-- 没有系统调用过滤、网络命名空间或文件系统挂载隔离。被允许的 Node/解释器脚本仍拥有当前 OS 用户的能力。
-- 一次性 cwd 只减少相对路径污染，**不是 chroot**。允许规则中的程序若本身会写绝对路径，白名单不会阻止它。
-- `realpath` 与 `spawn` 之间仍有文件系统 TOCTOU 窗口；白名单路径及其父目录应由可信管理员维护。
-- Windows 的进程树终止语义弱于 POSIX 进程组；本日实测环境是 macOS/Node 24。
-- 脱敏不是通用 DLP。未配置的任意秘密格式仍可能泄露；低熵参数的 SHA-256 也可能被字典猜测。
-- JSONL 不是防篡改账本，没有哈希链、签名、WORM、跨进程锁或远端复制。
-
-## 4. 架构与执行顺序
-
-```text
-结构化 { executable, args, timeoutMs? }
-                  │
-                  ▼
-      参数校验 + realpath(executable)
-                  │
-                  ▼
-  规则逐条比较：realpath(executable) + 完整 argv
-             │             │
-           不匹配         匹配
-             │             │
-             ▼             ▼
-  denied decision 审计   allowed decision 审计
-             │             │
-             │          写失败：AUDIT_WRITE_FAILED，不 spawn
-             │             │ 写成功
-             │             ▼
-             │       有界并发 / FIFO 队列 / 排队取消
-             │             │
-             │             ▼
-             │      mkdtemp → spawn(shell:false)
-             │             │
-             │       timeout / bytes / abort
-             │             │
-             │             ▼
-             │       close → 清理 → completion 审计
-             │             │
-             │       审计失败：显式错误；执行不可回滚
-             ▼             ▼
-               ToolResult + 可追溯 operationId
-```
-
-拒绝在创建临时目录和 `spawn` 之前发生。允许调用有两条审计：`decision/SPAWN_PENDING` 与最终 `completion`；拒绝调用只有一条最终 `decision/COMMAND_NOT_ALLOWED`。两段通过相同 `operationId` 关联。
-
-## 5. 白名单与 argv 规则
-
-### 5.1 为什么不用 startsWith
-
-`command.startsWith('git ') === true` 无法区分可信前缀与以下危险输入：
-
-```text
-git status; touch /tmp/not-ok
-printf safe > /absolute/host/path
-printf safe | another-command
-printf "$(another-command)"
-```
-
-D044 不接受 command string，也没有 PATH 搜索。规则中的 executable 必须是绝对路径，调用同样如此；比较前双方经过 `realpath`，避免仅凭另一个符号链接字符串绕过。argv 必须长度相同且每项 `===`。
-
-### 5.2 最小配置
-
-```ts
-import { createJsonlAuditSink, createSecureCommandTool } from './src/index.ts';
-
-const source = "process.stdout.write('safe')";
-const tool = createSecureCommandTool({
-  allowlist: [{
-    id: 'print-safe-v1',
-    executable: process.execPath,
-    args: ['-e', source],
-  }],
-  auditSink: createJsonlAuditSink({ filePath: '.audit/secure-command.jsonl' }),
-  resources: {
-    defaultTimeoutMs: 500,
-    maxTimeoutMs: 2_000,
-    maxOutputBytes: 4_096,
-    maxConcurrent: 1,
-    maxQueue: 2,
-    maxQueueWaitMs: 500,
-  },
-  sensitiveValues: ['FAKE_EXAMPLE_ONLY_NOT_A_CREDENTIAL'],
-});
-
-const result = await tool.execute(
-  { executable: process.execPath, args: ['-e', source], timeoutMs: 500 },
-  { workspaceRoot: process.cwd() },
-);
-```
-
-规则是“固定程序 + 固定完整参数”。需要动态参数时，应把每个可信组合定义成规则，或在上层把结构化业务输入编译成严格受控规则；不要把任意用户字符串插进 `node -e`、shell、PowerShell 等解释器规则。允许解释器等于允许该段代码具备当前用户权限。
-
-## 6. 资源预算与取消语义
-
-| 配置 | 默认值 | 含义 |
-| --- | ---: | --- |
-| `defaultTimeoutMs` | 5000 | 未显式传 timeout 时的子进程 wall timeout；若只设置更低的 max，会随 max 下调 |
-| `maxTimeoutMs` | 30000 | 每调用 timeout 的可配置上限 |
-| `maxOutputBytes` | 8192 | stdout 与 stderr **合计保留**的原始字节上限 |
-| `maxConcurrent` | 1 | 同一工具实例内允许同时运行的子进程数 |
-| `maxQueue` | 0 | 满载时可等待的调用数；0 表示不排队 |
-| `maxQueueWaitMs` | 1000 | 排队等待上限，不计入子进程 wall timeout |
-
-约束：除 `maxQueue >= 0` 外均为正安全整数，`defaultTimeoutMs <= maxTimeoutMs`。调用级 `timeoutMs` 必须位于 `1..maxTimeoutMs`。
-
-wall timer 从 `spawn` 后启动，覆盖子进程直到 `close`；realpath、decision 审计、排队与最终清理不计入该 timer。排队有独立时限。超限、超时和运行中 abort 会优先尝试 POSIX 进程组 `SIGKILL`，避免只杀父 shell/父进程留下孙进程。
-
-输出按收到的 Buffer 字节计数，而不是 `string.length`。超限时停止继续保留并终止进程；解码时避免因为截断 UTF-8 产生超出预算的替换字符。审计里的 `stdoutBytes/stderrBytes` 是实际保留字节数，不谎称测得进程一生累计产生的全部字节。
-
-## 7. 审计 schema、脱敏与写失败策略
-
-### 7.1 每条 JSONL 的字段
-
-| 字段 | 作用 |
+| 命令 | 实际结果 |
 | --- | --- |
-| `schemaVersion` | 当前为 1 |
-| `timestamp` | ISO 时间；工厂可注入 `clock` |
-| `operationId` | 同次调用的 decision/completion 关联 ID；可注入 `idGenerator` |
-| `phase` | `decision` 或 `completion` |
-| `tool` / `ruleId` | 工具名与命中的规则；拒绝时 ruleId 为 null |
-| `decision` / `status` | allowed/denied；pending/succeeded/denied/failed |
-| `resultCode` | `SPAWN_PENDING`、`OK`、白名单/资源/超时/审计等明确结果码 |
-| `executable` / `argv` | 脱敏后的操作标识与参数摘要 |
-| `argvSha256` | 对原始 argv 的 JSON 数组做 SHA-256，便于精确复核而不保存明文 |
-| `durationMs` / `queueWaitMs` | 单调时钟耗时与排队耗时；单调时钟可注入 |
-| `exitCode` / `signal` | 子进程退出信息；未启动时为 null |
-| `resource` | timeout、输出预算、保留字节、是否截断、是否清理 |
+| `npm run check` | 通过：TypeScript、ESLint，以及 **54 个测试文件 / 505 个测试**全部通过 |
+| `npm run test:coverage` | 通过：**54 / 54** 测试文件、**505 / 505** 测试；未执行 0、跳过 0 |
+| `git diff --check` | 通过：无 whitespace error |
 
-`monotonicClock` 用于 duration，避免系统时间回拨造成负耗时。无效 schema 的调用在命令决策前返回 `INVALID_ARGUMENTS`；它们没有可信 executable/argv，不进入本命令执行审计，可由上层请求校验日志记录。
+本次 `All files` 覆盖率：
 
-### 7.2 脱敏不是审计的全部
+| Statements | Branches | Functions | Lines |
+| ---: | ---: | ---: | ---: |
+| **91.51%** | **86.55%** | **97.26%** | **93.75%** |
 
-仅打印“参数已脱敏”不足以追溯操作。本日同时保存操作 ID、规则、结果、时长、退出与资源字段。脱敏顺序为：
+这些数值来自当前基线的真实 Vitest/V8 输出。它们用于回归比对，不代表 91.51% 的攻击路径已验证，也不改变本文任何未解决状态。
 
-1. 将 `sensitiveValues` 中的每个非空值替换为 `[REDACTED]`；
-2. 对 `api_key=...`、`password:...`、`secret=...`、`token:...` 等常见键值做保守替换；
-3. argv、结果 args、stdout、stderr 和返回文本都经过替换；
-4. 原始 argv 只用于等值比较和 SHA-256，不主动写入审计。
+通过上述命令只表示文档日没有破坏既有实现，并不关闭风险矩阵。正式评审仍须在[检查清单](docs/d045-security-review-checklist.md)记录实际 SHA、部署配置、证据链接、owner、风险接受期限和签署角色。
 
-真实系统应尽量减少 argv 秘密，使用安全注入的凭证代理，并对审计文件设置最小权限、保留周期和访问控制。
+## 9. D046 建议，不在本日交付内
 
-### 7.3 fail-closed 真值表
+下一阶段可做最小、无害的实证：
 
-| 阶段 | 审计结果 | 行为 |
-| --- | --- | --- |
-| 未允许命令的 decision | 失败 | 返回 `AUDIT_WRITE_FAILED`；不 spawn |
-| 允许命令的 decision | 失败 | 返回 `AUDIT_WRITE_FAILED`；不进入队列、不创建 cwd、不 spawn |
-| 子进程完成后的 completion | 失败 | 返回 `AUDIT_WRITE_FAILED`；**不假装回滚已经发生的副作用** |
-| 任意写入 | 成功 | 按实际允许/拒绝/结果返回 |
+1. 不可信 Markdown/MCP 内容的 canary 提示注入链，并验证最小权限能切断。
+2. 文件最终 symlink、父目录 symlink、新文件与 TOCTOU。
+3. MCP 未换行/超长帧和巨大结果的有界资源测试。
+4. 本地 Provider 假服务的慢响应、大响应、redirect 与错误脱敏。
+5. D043/D044 shell 元字符、argv、输出和审计故障对照。
+6. 解释器白名单与真实 OS 文件/网络边界。
+7. 审计文件权限、篡改可见性和 decision/completion 失败差异。
+8. 普通工具缺省资源预算及显式 D030 包装对照。
 
-因此本日没有静默 fail-open，也不宣称 completion 失败能提供事务保证。需要“所有副作用都可回滚”的系统必须使用事务性执行后端，而不是仅靠日志。
+这些项目前均为 **[D046 待实证]**。本日没有创建对应 Demo、攻击回放或测试证据；如果未来修复，应先写真实 RED，再实现 GREEN，并复跑完整回归。
 
-### 7.4 JSONL sink 的可靠性边界
+## 10. 本日变更边界
 
-`createJsonlAuditSink` 在同一 sink 实例内用 Promise 链串行化写入；每条记录通过一次 `appendFile(..., { flag: 'a' })` 追加，记录以单个 LF 结尾。前一次失败会返回给调用方，但不会毒化后续写入链。父目录按需创建。
-
-“原子单条 append”仅指本实现的单条追加写入与实例内串行语义；不承诺多进程协调、断电持久化、fsync、网络文件系统语义或防篡改。生产审计应使用受控权限和可靠集中式审计设施。
-
-## 8. API 与 Registry 组合
-
-公共导出：
-
-- `createSecureCommandTool(options)`
-- `createJsonlAuditSink({ filePath })`
-- 类型：`CommandAllowRule`、`SecureCommandResources`、`SecureCommandResult`、`SecureCommandToolOptions`、`AuditSink`、`CommandAuditRecord`、`AuditResourceUsage`
-- `runD044Demo(output)`
-
-`AuditSink.append(record)` 可注入内存、测试或受控远程实现。本日只提供本地 JSONL，未引入服务。
-
-若放入 D029 Registry，仍需同时授权工具动作，例如 `secure_command:exec`；Registry 权限是外层主体准入，命令白名单是内层操作准入，两者不能互相替代。本日没有把新命令偷偷加入旧 Agent 默认工具集。
-
-## 9. 测试矩阵
-
-本日新增 3 个测试文件、38 个测试：
-
-| 区域 | 覆盖 |
-| --- | --- |
-| 精确白名单 | 成功、非零退出、空白名单、相对路径/重复 id/NUL 配置 |
-| shell 绕过 | `;`、`>`、`|`、`$()`、反引号后缀；字面元字符在允许 argv 中不被解释 |
-| 启动前拒绝 | 未白名单绝对路径写 marker 不存在，拒绝时临时根目录仍为空 |
-| 输入与 Schema | null/数组/额外字段/错误类型/NUL/相对 executable/timeout 边界 |
-| 环境隔离 | 宿主伪造 env 不继承；一次性 cwd 可写并在结束后删除 |
-| wall timeout | 真实悬挂进程被终止，审计有耗时与退出信息 |
-| 输出字节 | 多字节 UTF-8 洪水、stdout/stderr 共享预算、保留字节与截断标记 |
-| 并发与队列 | 0 队列满载拒绝、有界等待、排队超时、预取消、运行/排队取消 |
-| 审计 | decision/completion、操作摘要与哈希、伪造秘密不泄露 |
-| 审计故障 | 允许/拒绝 decision 失败不执行；completion 失败显式报错且不回滚 |
-| JSONL | 并发 append 顺序与一行一记录；失败不静默、不毒化后续写入 |
-| Demo | 允许、拒绝、绕过、输出、超时、fail-closed、8 条审计与清理 |
-
-## 10. 真实 TDD RED → GREEN
-
-测试先于实现编写。证据均为实际命令输出，没有手工编造结果。
-
-### RED 1：实现模块不存在
-
-```text
-Test Files  3 failed (3)
-Tests       0
-FAIL test/d044-secure-command.test.ts [Test suite failed to run]
-Error: Cannot find module '../src/tools/secure-command.ts'
-```
-
-完整输出：`evidence/d044-tdd-red.txt`。
-
-### RED 2：只有类型和 NOT_IMPLEMENTED 骨架
-
-```text
-Test Files  3 failed (3)
-Tests       38 failed (38)
-D044 JSONL AuditSink: 2 failed
-D044 安全加固 Demo: 1 failed
-D044 精确 argv/资源/审计: 35 failed
-```
-
-完整输出：`evidence/d044-tdd-red-behavior.txt`。这使 RED 不仅证明“缺文件”，还证明所有新行为在实现前确实不成立。
-
-### GREEN：实现后同一组测试
-
-```text
-Test Files  3 passed (3)
-Tests       38 passed (38)
-Duration    544ms
-```
-
-完整输出：`evidence/d044-tdd-green.txt`。随后首次原生 CLI 运行还发现 Node 24 strip-only 不支持 TypeScript 参数属性；将其改为显式字段赋值后，同一 `npm run demo:d044` 才通过。这避免了“Vitest 绿色但真实入口不能启动”。
-
-## 11. 实际 Demo transcript
-
-最终 `evidence/d044-transcript.txt` 来自真实 `npm run demo:d044`：
-
-```text
-D044 安全边界：realpath(executable) + 完整 argv 精确白名单；spawn shell:false
-allowed=OK stdout=allowed-ok
-denied=COMMAND_NOT_ALLOWED markerCreated=false
-shellBypass=COMMAND_NOT_ALLOWED markerCreated=false
-output=COMMAND_OUTPUT_LIMIT capturedBytes=64 budget=64
-timeout=COMMAND_TIMEOUT budgetMs=40
-auditFailure=AUDIT_WRITE_FAILED markerCreated=false
-auditRecords=8 redacted=true digest=sha256
-D044 Demo PASS
-auditEvidence=evidence/d044-audit.jsonl
-```
-
-8 条 JSONL 依次为：成功 decision/completion、未白名单 decision、shell 绕过 decision、输出超限 decision/completion、超时 decision/completion。审计故障场景使用故意失败的独立 sink，所以不会凭空伪造一条“写入成功”的记录；终端中的 `AUDIT_WRITE_FAILED + markerCreated=false` 才是它的证据。
-
-可直接复核：
-
-```bash
-node -e "const fs=require('node:fs'); const rows=fs.readFileSync('evidence/d044-audit.jsonl','utf8').trim().split('\\n').map(JSON.parse); console.log(rows.length, rows.every(r=>r.operationId && r.argvSha256.length===64))"
-```
-
-## 12. 全量质量证据
-
-实际 `npm run test:coverage`：
-
-```text
-Test Files  54 passed (54)
-Tests       505 passed (505)
-All files: Statements 91.47% | Branches 86.50% | Functions 97.26% | Lines 93.75%
-```
-
-原始输出：`evidence/d044-coverage.txt`。全量 check 输出：`evidence/d044-check.txt`。最终提交前还会重跑 check、Demo、`git diff --check`，不将一次时序波动或局部测试冒充最终全量通过。
-
-## 13. 文件导航与后续原则
-
-- 核心：`src/tools/secure-command.ts`
-- 审计：`src/observability/audit-sink.ts`
-- Demo：`src/demo/d044.ts`、`scripts/d044-security.ts`
-- 测试：`test/d044-*.test.ts`
-- 课程：`docs/d044-security-course.md`
-- 证据：`evidence/d044-*`
-
-继续加固时，优先使用操作系统级隔离、低权限独立用户、只读根文件系统、显式网络策略、CPU/内存 cgroup、集中式防篡改审计。不要把“加一道字符串过滤”当成下一层安全边界。
+- 变更仅为本 README 与三份 `docs/d045-*.md` 中文材料。
+- 保留 D044 的源码、测试、Demo、evidence 与历史文档，不改写既有安全结论。
+- 不做 D046，不做 release、外部 issue 或依赖升级。
+- 文档中的部署架构、加固优先级和签署门槛是建议；只有明确标为代码+测试的条目才代表现有自动化证据。
