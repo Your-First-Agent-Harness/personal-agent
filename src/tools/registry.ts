@@ -41,8 +41,13 @@ export interface ToolDescriptor extends ToolSchema {
   readonly metadata: ToolMetadata;
 }
 
+export type ToolFactory = () => Tool | Promise<Tool>;
+
 interface RegistryEntry {
-  readonly tool: Tool;
+  readonly schema: ToolSchema;
+  tool?: Tool;
+  readonly factory?: ToolFactory;
+  loading?: Promise<Tool>;
   readonly version: string;
   readonly metadata: ToolMetadata;
   readonly tenantId?: string;
@@ -50,25 +55,32 @@ interface RegistryEntry {
   readonly resilience?: ResilientToolExecutor;
 }
 
-function createEntry(tool: Tool, options: ToolRegistrationOptions): RegistryEntry {
-  if (tool === null || typeof tool !== 'object') {
-    throw new TypeError('非法工具注册：工具必须是对象');
+function validateSchema(schema: ToolSchema): void {
+  if (schema === null || typeof schema !== 'object') {
+    throw new TypeError('非法工具注册：Schema 必须是对象');
   }
-  if (typeof tool.name !== 'string' || tool.name.trim() === '') {
+  if (typeof schema.name !== 'string' || schema.name.trim() === '') {
     throw new TypeError('非法工具注册：工具名称必须是非空字符串');
   }
-  if (typeof tool.description !== 'string' || tool.description.trim() === '') {
+  if (typeof schema.description !== 'string' || schema.description.trim() === '') {
     throw new TypeError('非法工具注册：工具描述必须是非空字符串');
   }
-  if (tool.parameters === null || typeof tool.parameters !== 'object' || Array.isArray(tool.parameters)) {
+  if (schema.parameters === null || typeof schema.parameters !== 'object' || Array.isArray(schema.parameters)) {
     throw new TypeError('非法工具注册：parameters 必须是对象');
   }
-  const schemaIssue = validateToolSchema(tool.parameters);
+  const schemaIssue = validateToolSchema(schema.parameters);
   if (schemaIssue !== undefined) {
     throw new TypeError(
       `非法工具注册：parameters ${schemaIssue.path}，${schemaIssue.message}（期望 ${schemaIssue.expected}）`,
     );
   }
+}
+
+function createEntry(tool: Tool, options: ToolRegistrationOptions): RegistryEntry {
+  if (tool === null || typeof tool !== 'object') {
+    throw new TypeError('非法工具注册：工具必须是对象');
+  }
+  validateSchema(tool);
   if (typeof tool.execute !== 'function') {
     throw new TypeError('非法工具注册：execute 必须是函数');
   }
@@ -82,6 +94,37 @@ function createEntry(tool: Tool, options: ToolRegistrationOptions): RegistryEntr
   }
   return {
     tool,
+    schema: { name: tool.name, description: tool.description, parameters: tool.parameters },
+    version,
+    metadata,
+    ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
+    sensitive: options.sensitive === true,
+    ...(options.resilience === undefined
+      ? {}
+      : { resilience: new ResilientToolExecutor(options.resilience) }),
+  };
+}
+
+function createLazyEntry(
+  schema: ToolSchema,
+  factory: ToolFactory,
+  options: ToolRegistrationOptions,
+): RegistryEntry {
+  validateSchema(schema);
+  if (typeof factory !== 'function') {
+    throw new TypeError('非法工具注册：factory 必须是函数');
+  }
+  const version = options.version ?? 'unversioned';
+  if (typeof version !== 'string' || version.trim() === '') {
+    throw new TypeError('非法工具注册：version 必须是非空字符串');
+  }
+  const metadata = options.metadata ?? {};
+  if (metadata === null || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw new TypeError('非法工具注册：metadata 必须是对象');
+  }
+  return {
+    schema: { ...schema },
+    factory,
     version,
     metadata,
     ...(options.tenantId === undefined ? {} : { tenantId: options.tenantId }),
@@ -94,9 +137,9 @@ function createEntry(tool: Tool, options: ToolRegistrationOptions): RegistryEntr
 
 function describeEntry(entry: RegistryEntry): ToolDescriptor {
   return {
-    name: entry.tool.name,
-    description: entry.tool.description,
-    parameters: entry.tool.parameters,
+    name: entry.schema.name,
+    description: entry.schema.description,
+    parameters: entry.schema.parameters,
     version: entry.version,
     metadata: entry.metadata,
   };
@@ -113,7 +156,7 @@ export class ToolRegistry {
   private isVisible(entry: RegistryEntry): boolean {
     const inTenant = entry.tenantId === undefined || entry.tenantId === this.policy.tenantId;
     const inWhitelist = this.policy.allowedTools === undefined
-      || this.policy.allowedTools.includes(entry.tool.name);
+      || this.policy.allowedTools.includes(entry.schema.name);
     return inTenant && inWhitelist;
   }
 
@@ -129,6 +172,18 @@ export class ToolRegistry {
     this.tools.set(tool.name, entry);
   }
 
+  registerLazy(
+    schema: ToolSchema,
+    factory: ToolFactory,
+    options: ToolRegistrationOptions = {},
+  ): void {
+    const entry = createLazyEntry(schema, factory, options);
+    if (this.tools.has(schema.name)) {
+      throw new Error(`工具重复注册：${schema.name}`);
+    }
+    this.tools.set(schema.name, entry);
+  }
+
   replace(tool: Tool, options: ToolRegistrationOptions = {}): void {
     const entry = createEntry(tool, options);
     if (!this.tools.has(tool.name)) {
@@ -142,11 +197,11 @@ export class ToolRegistry {
   }
 
   /** 发给模型的 Schema 列表，仅包含当前策略可见工具，顺序稳定 */
-  list(): ToolSchema[] {
-    return this.visibleEntries().map(({ tool }) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
+  list(_query = ''): ToolSchema[] {
+    return this.visibleEntries().map(({ schema }) => ({
+      name: schema.name,
+      description: schema.description,
+      parameters: schema.parameters,
     }));
   }
 
@@ -172,7 +227,7 @@ export class ToolRegistry {
   async execute(call: ToolCall, context: ToolContext): Promise<ToolResult> {
     const entry = this.tools.get(call.name);
     if (entry === undefined) {
-      const available = this.visibleEntries().map(({ tool }) => tool.name).join(', ');
+      const available = this.visibleEntries().map(({ schema }) => schema.name).join(', ');
       return toolError('UNKNOWN_TOOL', `未知工具：${call.name}`, true, `请改用已注册工具：${available}`);
     }
     if (!this.isVisible(entry)) {
@@ -183,8 +238,6 @@ export class ToolRegistry {
         '请改用当前策略可见且允许的工具',
       );
     }
-    const { tool } = entry;
-
     let args: unknown;
     try {
       args = call.arguments.trim() === '' ? {} : JSON.parse(call.arguments);
@@ -197,7 +250,7 @@ export class ToolRegistry {
       );
     }
 
-    const issue = validateArguments(tool.parameters, args);
+    const issue = validateArguments(entry.schema.parameters, args);
     if (issue !== undefined) {
       return toolError(
         'INVALID_ARGUMENTS',
@@ -249,11 +302,44 @@ export class ToolRegistry {
       ...(this.policy.tenantId === undefined ? {} : { tenantId: this.policy.tenantId }),
     };
     try {
+      // eager/已缓存工具保持 D047 的同步进入 execute 时序；仅首次 lazy 加载需要等待。
+      const tool = entry.tool ?? await this.resolveTool(entry);
       return entry.resilience === undefined
         ? await tool.execute(args, executionContext)
         : await entry.resilience.execute(tool, args, executionContext);
     } catch (error) {
       return errorResult(normalizeError(error));
+    }
+  }
+
+  private async resolveTool(entry: RegistryEntry): Promise<Tool> {
+    if (entry.tool !== undefined) return entry.tool;
+    const factory = entry.factory;
+    if (factory === undefined) throw new TypeError(`工具 ${entry.schema.name} 不可执行`);
+
+    if (entry.loading === undefined) {
+      entry.loading = (async () => {
+        const tool = await factory();
+        if (tool === null || typeof tool !== 'object') {
+          throw new TypeError('非法懒加载工具：factory 必须返回工具对象');
+        }
+        validateSchema(tool);
+        if (typeof tool.execute !== 'function') {
+          throw new TypeError('非法懒加载工具：execute 必须是函数');
+        }
+        if (tool.name !== entry.schema.name) {
+          throw new TypeError('非法懒加载工具：工具名称必须与注册 Schema 一致');
+        }
+        entry.tool = tool;
+        return tool;
+      })();
+    }
+
+    try {
+      return await entry.loading;
+    } catch (error) {
+      entry.loading = undefined;
+      throw error;
     }
   }
 }

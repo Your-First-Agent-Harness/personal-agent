@@ -1,0 +1,17 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 demo:d048
+> node scripts/d048-dynamic-tools.ts
+
+全量目录工具 (8): weather_current, weather_forecast, calendar_create, expense_report, document_translate, currency_convert, file_search, git_status
+全量目录 Schema 字符数: 2049
+第 1 轮实际发送工具: weather_current, weather_forecast
+第 1 轮实际发送 Schema 字符数: 497
+第 2 轮实际发送工具: weather_current, weather_forecast
+第 2 轮实际发送 Schema 字符数: 497
+factory 加载计数: {"weather_current":1,"weather_forecast":0,"calendar_create":0,"expense_report":0,"document_translate":0,"currency_convert":0,"file_search":0,"git_status":0}
+实际执行工具: weather_current
+工具完整结果: {"city":"上海","temperatureC":24,"condition":"晴","walking":"适合散步","source":"tool-weather"}
+最终回答: 上海当前 24°C，晴，适合散步。依据：tool-weather。完整结果：{"city":"上海","temperatureC":24,"condition":"晴","walking":"适合散步","source":"tool-weather"}
+字符数只是可测量代理指标，不是 token 精确节省。
+D048 Demo PASS

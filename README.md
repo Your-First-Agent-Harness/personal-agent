@@ -1,188 +1,307 @@
-# D047｜文档日：Agent 工具调用的安全实践公开课（未授课）
+# D048 — 动态工具检索，按需加载
 
-本日交付一套面向外部开发者的 **90 分钟公开课课程包**：从模型生成 ToolCall 开始，沿 Registry 授权、参数与业务校验、敏感确认、有界执行、不可信结果回喂和双阶段审计，讲清“工具能调用”与“生产可上线”之间的距离。
+> 工具很多，不等于每轮都要把全部工具 Schema 塞进 prompt；模型没看到某个工具，也不等于该工具获得了新的权限边界。
 
-**明确未实际授课。** 当前没有公开课直播、录屏、真实回放、出席人数、学员反馈或外部评价；课程中的“课堂”“学员”“讲师”均指教学预案。D046 transcript 是既有命令 Demo 的真实终端证据，不是本公开课回放。
+本日在 **D047（`6f8dd698ba8d1d5e3abaa572edaa737ff614c4dd`）** 之上实现：
 
-本日只修改本 README 与 `docs/d047*` 文档，不修改运行时、测试、package 或证据文件，不新增依赖，不制作 release，不创建外部 issue。
+- 基于当前用户请求或每轮显式查询的确定性词法检索；
+- `DynamicToolRegistry` 只向模型发送少量选中 Schema；
+- `registerLazy()` 提供同步或异步 factory、按需加载、并发去重和成功缓存；
+- 保留 `ToolRegistry.execute()` 的 allowlist、tenant、JSON/Schema、敏感确认、resilience 和错误回喂；
+- `runAgentLoop()` 每轮重新检索，之前发现的工具仍可执行，完整工具结果继续进入后续消息；
+- 零新增运行时依赖，Node 24 原生 TypeScript ESM，完全离线 Demo。
 
-## 1. 交付物
+## 1. 先分清五个状态
 
-| 文件 | 用途 |
-| --- | --- |
-| [docs/d047-public-course.md](docs/d047-public-course.md) | 90 分钟完整讲义：逐段概念、代码事实、D046 演示、生产清单与证据索引 |
-| [docs/d047-slides.md](docs/d047-slides.md) | 22 页幻灯片文案：每页 3–5 个要点、视觉建议与讲解重点 |
-| [docs/d047-instructor-script.md](docs/d047-instructor-script.md) | 可直接授课的逐分钟讲师稿：原话、提问、转场、Demo 操作与失败兜底 |
-| [docs/d047-exercises.md](docs/d047-exercises.md) | 5 组练习、事故推演、退出题、参考答案、评分 rubric 与 18 条 FAQ |
-| 本 README | 课程定位、90 分钟结构、证据边界、复跑入口与真实验收结果 |
+| 状态 | 本日含义 | 是否授予执行权限 |
+|---|---|---|
+| registered | 工具或 lazy 描述已登记在 Registry | 否 |
+| visible | 通过 Registry 的 allowlist / tenant 目录过滤 | 否 |
+| selected | 本次词法查询命中，Schema 被放进本轮模型请求 | 否 |
+| loaded | lazy factory 已成功返回 Tool，并缓存到该注册项 | 否 |
+| executable | 本次 `execute()` 通过全部策略、参数和确认检查 | 是，仍受既有执行约束 |
 
-代码基线是 D046 提交 `b97cffa0c04d0258a410f46ab3c054fb5f58de15`，当前分支为 `D047`。本日没有从 main 重建或合并 main。
+动态检索只改变 **selected**。它没有取代 D029 的策略边界，也没有创造第四种租户或白名单语义。
 
-## 2. 与 D045 内部分工的区别
-
-D045 是面向仓库内部的安全架构评审，重点是攻击面、风险登记、P0/P1/P2 和整改优先级。D047 不复述那张风险矩阵，而是面向第一次接触本项目的开发者，沿一次真实调用链组织教学：
-
-```text
-模型提出 ToolCall
-  → 工具发现与执行 allowlist
-  → tenant / subject / object / action 授权
-  → JSON、Schema 与业务条件校验
-  → 敏感操作按本次参数确认
-  → timeout / retry / concurrency / output / process 边界
-  → tool.execute 产生或拒绝副作用
-  → 不可信 ToolResult 回喂模型
-  → decision + completion 证据与异常处置
-```
-
-课程主线只有一句：**ToolCall 是提案，不是授权。** D045 中的未解决风险仍被保留为明确的“不能宣称”，不会被包装成已修复成果。
-
-## 3. 学习目标与 90 分钟结构
-
-听众完成课程后，应能：
-
-1. 区分模型提议、宿主执行授权与业务对象授权；
-2. 说明发现面、执行面、Schema、确认和 OS 隔离各自不能替代什么；
-3. 识别工具结果、文件、网页和 MCP 内容形成的间接提示注入与外传链；
-4. 正确处置非幂等超时、重试和审计写失败；
-5. 使用生产清单作出 go/no-go 判断。
-
-| 时间 | 内容 | 对应材料 |
-| --- | --- | --- |
-| 0–6 分钟 | 冷启动：为什么“排查构建”会变成读取 `.env` 的提案 | Slide 1–2 |
-| 6–16 分钟 | ToolCall 解剖、信任边界与 Registry 顺序 | Slide 3–5 |
-| 16–28 分钟 | 工具发现、租户、参数形状与业务授权 | Slide 6–9 |
-| 28–37 分钟 | 不可信工具结果、秘密外传链与 Loop 保险丝 | Slide 10–12 |
-| 37–51 分钟 | D046 命令安全演示：cwd、白名单、资源预算与非容器边界 | Slide 13–16 |
-| 51–60 分钟 | 敏感确认、幂等、超时与重试 | Slide 17–18 |
-| 60–68 分钟 | 外部 HTTP 与 MCP：协议适配不等于信任继承 | Slide 19 |
-| 68–76 分钟 | 双阶段审计、写失败与“结果未知”语义 | Slide 20 |
-| 76–84 分钟 | 小组事故推演 | Slide 21 |
-| 84–90 分钟 | 生产清单、退出题与收束 | Slide 22 |
-
-以上是授课时间预算，不是已经发生的课堂记录。讲师完整话术和压缩课时方案见[讲师稿](docs/d047-instructor-script.md)。
-
-## 4. 课程使用的真实证据
-
-课程用四种标记避免混淆事实与建议：
-
-| 标记 | 本课中的例子 |
-| --- | --- |
-| 【代码实证】 | Registry 检查顺序、Schema 子集、Loop 回喂、weather 响应边界、resilience 默认值 |
-| 【运行实证】 | D046 的 12 项门禁、8 个 operation、16 条 JSONL、3 次允许 spawn、拒绝 spawn 增量 0 |
-| 【教学推演】 | `.env` 冷启动、取消订单、支付超时、小组事故与练习 |
-| 【未解决风险】 | 默认开放 Shell、文件符号链接、OS 隔离、MCP 动态工具与本地审计耐久性 |
-
-主要一手入口：
-
-- [`src/tools/registry.ts`](src/tools/registry.ts)：allowlist、租户、JSON、Schema、确认和 resilience 顺序；
-- [`src/runtime/loop.ts`](src/runtime/loop.ts)：工具结果回喂与 Loop 停止条件；
-- [`src/tools/workspace.ts`](src/tools/workspace.ts)：普通文件工具当前的真实路径边界；
-- [`src/tools/sandboxed-command.ts`](src/tools/sandboxed-command.ts) 与 [`src/tools/secure-command.ts`](src/tools/secure-command.ts)：两种命令模型；
-- [`src/tools/weather.ts`](src/tools/weather.ts)、[`src/adapters/mcp-tool.ts`](src/adapters/mcp-tool.ts)：外部输入边界；
-- [`src/observability/audit-sink.ts`](src/observability/audit-sink.ts)：JSONL 串行 append；
-- [D046 transcript](evidence/d046-transcript.txt) 与 [D046 audit JSONL](evidence/d046-audit.jsonl)：已保存的真实运行证据；
-- [D045 内部安全评审](docs/d045-security-architecture-review.md)：课后深入阅读，不是本课外讲结构。
-
-## 5. D046 演示的课堂用法
-
-课堂只原样复跑：
-
-```bash
-npm run demo:d046
-```
-
-要求 Node.js 24+，无需 API Key，不访问外网。演示使用唯一 `mkdtemp` 实验根、专用 victim/marker、伪造环境变量和 `finally` 清理。讲师必须先展示安全边界，再运行命令。
-
-重点只讲三组观察：
-
-1. **D043 绝对路径/cwd**：可以离开初始 cwd，但 D046 的 victim 始终在实验根内；固定 env 不泄露不等于文件系统隔离。
-2. **D044 精确准入与正向控制**：五类未允许调用在 spawn 前拒绝；env 正向控制证明真实执行计数有效，三条允许链合计 spawn 3 次。
-3. **资源与审计**：共享 64 字节输出预算、30ms wall timeout、8 个 operation 与 16 条双阶段记录；最后要求实验根删除。
-
-现有真实 transcript 末尾为：
+## 2. 请求路径
 
 ```text
-summary auditRecords=16 operations=8 secureSpawnCount=3 secureDeniedSpawnDelta=0 hostRootRemoved=true recording=none
-D046 Demo PASS: 12 项门禁成立；攻击未离开实验根；明确未录屏。
-auditEvidence=evidence/d046-audit.jsonl
+最新 user 消息 / getToolQuery(messages, turn)
+                    │
+                    ▼
+DynamicToolRegistry.catalog()
+  仅取当前 allowlist + tenant 可见的静态 Schema
+                    │
+                    ▼
+searchToolSchemas(catalog, query, limit)
+  归一化 → 去重词元 → 评分 → 稳定排序 → 截断
+                    │
+                    ▼
+            本轮 provider.chat({ tools })
+                    │
+                    ▼ tool call
+ToolRegistry.execute()
+  allowlist → tenant → JSON → Schema → 敏感确认
+                    │
+                    ▼ 仅首次有效执行
+              lazy factory + cache
+                    │
+                    ▼
+         resilience → Tool.execute(args, context)
+                    │
+                    ▼
+          完整 ToolResult 回喂下一轮 AgentLoop
 ```
 
-这段话是**既有 D046 结果引用**，不是 D047 公开课现场输出。若课堂复跑失败，讲师必须保留真实错误并切换到已保存 transcript，不能手写 PASS 冒充本次成功。
+普通 `ToolRegistry` 仍返回全量可见 Schema。只有显式使用 `DynamicToolRegistry` 才开启动态子集。
 
-禁止把演示改造成真实用户路径、真实凭证、真实外传、端口监听、fork bomb、OOM 或其他破坏性载荷。
+## 3. 检索算法
 
-## 6. 必须保留的技术边界
+实现位于 `src/tools/retrieval.ts`，没有 embedding、网络请求或新增依赖。
 
-- **默认配置**：默认 CLI 注册内置工具，包括开放 `run_command`；allowlist 与敏感确认未显式配置时，不能声称已自动启用。
-- **Schema**：当前是本地子集，不是完整 JSON Schema；不能代替条件必填、对象属主、金额一致和状态机校验。
-- **文件路径**：普通文件工具当前使用绝对路径与词法根目录检查，不是全路径 realpath 隔离；D045 已记录符号链接风险。
-- **D043**：临时 cwd、固定 env 和进程组管理不是文件系统或 OS 沙箱。
-- **D044**：精确 executable/argv、`shell:false`、资源预算与审计很有价值，但仍不是容器；没有 namespace、cgroup、seccomp 或完整 MAC。
-- **结果回流**：工具、HTTP 与 MCP 内容仍不可信；结构校验不等于语义可信，Loop 限制不等于授权。
-- **重试**：默认 `maxRetries=0`；`retryable=true` 不是自动重试许可，超时不是事务回滚。
-- **审计**：decision 写失败阻止启动；允许命令 completion 写失败显式失败但不可回滚。本地 JSONL 不等于远程、防篡改、完整审计平台。
-- **验证范围**：测试与覆盖率只代表代码回归，不代表攻击面覆盖、外部安全认证或所有风险已经关闭。
+### 3.1 归一化与词元
 
-## 7. 备课与复跑
+1. 使用 Unicode `NFKC` 和小写归一化；
+2. 英文/数字提取连续 ASCII 词元，因此 `weather_current` 可按 `weather`、`current` 检索；
+3. 中文连续序列长度为 1～2 时保留整体，更长时生成相邻二字词元；
+4. 查询词元通过 `Set` 去重，重复输入同一个词不会重复加分。
+
+二字词元只是轻量词法近似。例如“请查询北京天气”会产生“查询”“北京”“天气”等词元，可以命中描述中的“查询当前天气”。它不是中文分词器或语义模型。
+
+### 3.2 评分与稳定排序
+
+每个唯一查询词元独立评分，分数累加：
+
+| 命中位置 | 分值 |
+|---|---:|
+| 工具名词元完全命中 | +12 |
+| 工具名子串命中 | +6 |
+| 描述词元完全命中 | +4 |
+| 描述子串命中 | +2 |
+
+名称和描述可以同时得分；同一类别内完全命中优先于子串命中。只保留正分结果，按以下顺序排序：
+
+1. 总分降序；
+2. 同分保持 `catalog()` 的注册顺序；
+3. 按 `limit` 截断。
+
+默认 `limit = 5`。边界行为是确定的：
+
+| 输入 | 行为 |
+|---|---|
+| 空字符串、纯空白、没有可识别词元 | `[]` |
+| 没有正分匹配 | `[]` |
+| `limit = 0` | `[]` |
+| 负数、小数、`NaN`、`Infinity` | 抛出“limit 必须是非负整数”的 `RangeError` |
+| 重复词、大小写差异 | 去重、归一化后检索 |
+| 同分 | 不随机、不按时间，保持目录顺序 |
+
+## 4. API 使用
+
+### 4.1 动态目录与 lazy tool
+
+```ts
+import {
+  DynamicToolRegistry,
+  runAgentLoop,
+  type ToolSchema,
+} from './src/index.ts';
+
+const weatherSchema: ToolSchema = {
+  name: 'weather_current',
+  description: '查询当前天气与温度 current weather',
+  parameters: {
+    type: 'object',
+    properties: { city: { type: 'string' } },
+    required: ['city'],
+    additionalProperties: false,
+  },
+};
+
+const registry = new DynamicToolRegistry({
+  limit: 3,
+  allowedTools: ['weather_current'],
+});
+
+registry.registerLazy(weatherSchema, async () => ({
+  ...weatherSchema,
+  execute: (args) => Promise.resolve({
+    content: JSON.stringify({ args, temperatureC: 24 }),
+  }),
+}));
+
+// 完整策略可见目录，不执行 factory。
+const catalog = registry.catalog();
+
+// 只返回本次查询选中的 Schema，也不执行 factory。
+const selected = registry.list('查询上海天气');
+
+const result = await runAgentLoop({
+  provider,                 // 调用方提供的既有 ModelProvider
+  registry,
+  messages: [{ role: 'user', content: '查询上海天气' }],
+  maxTurns: 4,
+  maxTokens: 512,
+  workspaceRoot: '.',
+});
+```
+
+也可以直接使用纯函数：
+
+```ts
+searchToolSchemas(catalog, 'weather WEATHER weather', 3);
+```
+
+### 4.2 每轮查询
+
+默认情况下，`runAgentLoop()` 使用消息中最新一条 `user` 内容作为每轮查询。没有用户查询时，动态目录返回空工具列表。
+
+需要显式控制时可传：
+
+```ts
+getToolQuery: (messages, turn) => turn === 1 ? '天气' : '日程'
+```
+
+Loop 每轮都重新调用 `registry.list(query)`，不会在首轮永久冻结目录。第二轮可以收到不同子集；工具调用是否允许执行仍由 `execute()` 独立判断。工具结果以完整 `tool` 消息回喂，不因为下一轮检索变化而丢失。
+
+### 4.3 向后兼容
+
+```ts
+const registry = new ToolRegistry();
+registry.register(existingTool);
+
+registry.list();        // 仍然是全量策略可见 Schema
+registry.list('天气');  // 普通 Registry 忽略可选查询，仍是全量
+```
+
+既有 `Tool`、provider 的 `ChatRequest.tools`、`runAgentLoop()` 和 `createAgentLoop()` 契约不变。eager 或已缓存工具仍同步进入原 `Tool.execute()`，避免改变取消信号等时序。
+
+## 5. lazy 生命周期与缓存
+
+`registerLazy(schema, factory, options?)` 接收静态 Schema 和 `() => Tool | Promise<Tool>`。静态 Schema 是目录展示和参数校验的依据，factory 返回工具的名称必须与注册名称一致。
+
+| 阶段 | factory 是否运行 |
+|---|---|
+| `registerLazy()` | 否 |
+| `catalog()` / `discover()` / 检索 / 被选中 | 否 |
+| 白名单或租户拒绝 | 否 |
+| JSON 或参数 Schema 校验失败 | 否 |
+| 敏感工具确认拒绝 | 否 |
+| 通过上述检查的首次有效执行 | 是 |
+| 后续执行 | 否，使用成功缓存 |
+| 多个并发首次执行 | 只运行一次，共享同一个加载 Promise |
+
+factory 抛错或 reject 时：
+
+- 错误进入 Registry 原有 `ToolResult` 错误边界，不向 Loop 抛出未处理异常；
+- 普通异常规范化为 `INTERNAL_ERROR`，不把原始密钥或错误细节写入 content；
+- 失败的 Promise 不成为永久缓存，后续有效执行可以重试；
+- 成功后才缓存 Tool，同一注册项不重复 factory；
+- `replace()` / `unregister()` 仍通过替换或删除整个注册项管理生命周期。
+
+## 6. 动态可见性不是授权
+
+`DynamicToolRegistry` 只覆盖 `list()` 的模型可见子集；所有执行仍进入同一个 `ToolRegistry.execute()`：
+
+1. 名称查找与白名单检查；
+2. 工具注册 tenant 与请求 tenant 匹配；
+3. JSON 解析；
+4. 注册 Schema 参数校验；
+5. 敏感工具显式确认；
+6. lazy 加载；
+7. 既有 resilience 与业务执行；
+8. 统一错误规范化。
+
+因此以下两件事可以同时成立：
+
+- 某次搜索没找到 `weather_current`，模型本轮看不到它；
+- 已注册且策略允许的直接 `weather_current` 调用仍可执行。
+
+反过来，被 allowlist / tenant 排除的工具既不会进入搜索目录，也不能通过构造 tool call 绕过执行策略。敏感工具在未确认前不会运行 factory。
+
+## 7. 离线 Demo
 
 ```bash
-npm ci
+npm run demo:d048
+```
+
+Demo 文件：
+
+- `src/demo/d048.ts`：8 个有区分度的 lazy 工具、scripted `ModelProvider`、真实 `runAgentLoop()`；
+- `scripts/d048-dynamic-tools.ts`：命令行入口；
+- `evidence/d048-transcript.txt`：真实终端输出。
+
+最终实测：
+
+| 指标 | 结果 |
+|---|---|
+| 全量目录 | 8 个工具 |
+| 全量目录 Schema | 2049 字符 |
+| 第 1 轮实际发送 | `weather_current`, `weather_forecast`；497 字符 |
+| 第 2 轮实际发送 | `weather_current`, `weather_forecast`；497 字符 |
+| factory 加载 | 只有 `weather_current = 1`，其余 7 个均为 0 |
+| 实际执行 | 只有 `weather_current` |
+| 完整工具结果 | 包含 `上海`、`24`、`晴`、`适合散步`、`tool-weather` |
+| 最终回答 | 由第二轮 provider 根据实际 tool 消息生成 |
+| Loop | 2 轮，`completed`，输出 `D048 Demo PASS` |
+
+**字符数只是可测量代理指标，不是 token 精确节省。** 本 Demo 不声称生产延迟、成本或性能提升，也不访问真实天气或模型 API。
+
+## 8. 测试与 TDD 证据
+
+新增 4 个测试文件，共 17 项：
+
+| 文件 | 覆盖 |
+|---|---|
+| `test/d048-tool-retrieval.test.ts` | 英文/中文、排序、同分、重复词、空查询、无匹配、limit、策略目录、旧 `list()` 兼容 |
+| `test/d048-lazy-tools.test.ts` | 选中不实例化、同步/异步加载、并发去重、缓存、factory 失败恢复、名称漂移、安全顺序、确认、resilience、搜索不可见仍可执行 |
+| `test/d048-loop.test.ts` | 每轮子集变化、最新用户查询、空查询、跨轮旧工具执行、完整结果回喂 |
+| `test/d048-demo.test.ts` | 真实 AgentLoop、8 个 lazy 工具、Schema 子集、factory 计数、工具执行和最终回答 |
+
+严格先写测试并运行：
+
+- RED：`evidence/d048-tdd-red.txt`，真实结果为 **16 failed / 1 passed / 17 total**；唯一通过项是旧 `ToolRegistry.list()` 尚未改变的兼容行为；
+- GREEN：`evidence/d048-tdd-green.txt`，同一批测试 **17 passed**；
+- 开发中旧 D036/D042 取消测试还捕获了 eager 工具新增微任务的时序回归；实现改为 eager/已缓存工具不等待 lazy Promise，相关测试恢复通过，未修改旧测试期望。
+
+最终完整验收：
+
+```bash
 npm run check
 npm run test:coverage
-npm run demo:d046
+npm run demo:d048
 git diff --check
 ```
 
-只复跑课程涉及的部分可执行规格：
+实测结果：
 
-```bash
-npx vitest run \
-  test/d028-schema-validation.test.ts \
-  test/d029-permissions.test.ts \
-  test/d030-resilience.test.ts \
-  test/d042-weather.test.ts \
-  test/d044-secure-command.test.ts \
-  test/d044-audit-sink.test.ts \
-  test/d046-attack-chains.test.ts \
-  test/d046-demo.test.ts
+- `npm run check`：lint、typecheck、**60 个测试文件 / 528 项测试**全部通过；
+- 覆盖率：语句 **91.37%**、分支 **86.24%**、函数 **96.94%**、行 **93.59%**；
+- `npm run demo:d048`：`D048 Demo PASS`；
+- `git diff --check`：无空白错误；
+- 未新增运行时依赖。
+
+## 9. 限制
+
+1. **词法检索不是语义理解。** 同义词、隐含意图和跨语言语义需要在名称/描述中有对应词，或由更上层查询构造提供；二字词元不是 NLP 分词。
+2. **排序不是学习排序。** 分数只用于小规模确定性候选筛选，不代表工具的业务成功率或权限等级。
+3. **隐藏不是权限。** 必须继续配置 Registry 的 allowlist、tenant、敏感确认和业务授权。
+4. **字符不是 token。** 2049 → 497 是本 Demo 的 JSON Schema 字符代理指标，不是精确 token、成本或延迟结论。
+5. **缓存是注册项级、进程内的。** 不是跨进程或持久缓存；替换/注销对应注册项后，新注册项有自己的加载状态。
+6. **注册 Schema 必须准确描述实现。** 参数校验以注册 Schema 为准，factory 返回名称必须一致；调用方应让实现描述和参数保持一致。
+7. **factory 是加载阶段，不是业务 resilience 工作。** 业务超时、重试和取消仍由 `Tool.execute()` 与既有 resilience 处理；factory 自身应避免执行不受控的长业务任务。
+
+## 10. 本日文件
+
+```text
+src/tools/retrieval.ts            词法检索与评分
+src/tools/dynamic-registry.ts     动态 Schema 子集与完整目录
+src/tools/registry.ts             lazy 注册、加载、缓存和统一执行
+src/runtime/loop.ts               每轮查询与真实 provider 工具子集
+src/demo/d048.ts                  离线真实 Loop Demo
+scripts/d048-dynamic-tools.ts     Demo 入口
+test/d048-*.test.ts               单元与集成测试
+evidence/d048-tdd-red.txt         真实 RED
+evidence/d048-tdd-green.txt       真实 GREEN
+evidence/d048-transcript.txt      真实 Demo transcript
 ```
-
-测试通过不能替代真实业务授权、OS 隔离、外部服务状态核验或上线评审。
-
-## 8. 课程包自检
-
-- [x] 90 分钟逐段时间合计完整，幻灯片与讲师稿页码一致；
-- [x] 22 页幻灯片均含标题、3–5 个要点、视觉建议和讲解重点；
-- [x] 讲师稿包含建议原话、互动、转场、D046 操作与失败兜底；
-- [x] 练习含参考答案、退出题、评分 rubric 和 FAQ；
-- [x] 明确区分代码事实、真实运行证据、教学推演和未解决风险；
-- [x] 未把 secure_command 称为容器，未把 Schema 称为完整 JSON Schema；
-- [x] 未虚构授课、回放、出席、学员反馈或外部评价；
-- [x] 最终门禁实跑结果已填写到第 9 节。
-
-## 9. 最终验收记录
-
-2026-11-12 在本分支实际运行完整检查；数值来自真实 Vitest/V8 输出。课程备课本身没有新增运行时测试，以下结果不代表攻击面覆盖率或外部安全认证。
-
-| 命令 | 实测结果 |
-| --- | --- |
-| `npm run check` | ESLint、TypeScript 通过；**56 个测试文件 / 511 项测试全部通过** |
-| `npm run test:coverage` | **56 / 56** 测试文件、**511 / 511** 测试通过，覆盖率门禁通过 |
-| `git diff --check` | 通过，无 whitespace error |
-
-`All files` 四项覆盖率：
-
-| Statements | Branches | Functions | Lines |
-| ---: | ---: | ---: | ---: |
-| **91.61%** | **86.67%** | **96.75%** | **93.86%** |
-
-## 10. 未发生事项
-
-- 未实际举办公开课，未进行直播或录屏；
-- 无真实课程回放、学员名单、出席数据、答卷、反馈或外部评价；
-- 未把 D046 安全演示 transcript 冒充公开课记录；
-- 未修改运行时、测试、package、D046 证据或历史文档；
-- 未执行 D048、release、外部 issue 或生产部署；
-- 未进行任何真实攻击、真实凭证读取、真实数据外传或外部安全认证。
-
-若后续真实授课，应另行记录实际日期、形式、演示结果、原始问题与改进；不得把本备课包倒填成已发生活动。
