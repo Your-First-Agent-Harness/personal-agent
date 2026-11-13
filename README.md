@@ -283,6 +283,8 @@ Demo 文件：
 
 最终完整验收：
 
+`vitest.config.ts` 使用 `maxWorkers: 1` 串行执行测试文件，避免真实子进程测试在并发和覆盖率插桩下挤占既有 80/100ms 超时窗口；不会跳过测试、关闭隔离或放宽超时与覆盖率阈值。
+
 ```bash
 npm run check
 npm run test:coverage
