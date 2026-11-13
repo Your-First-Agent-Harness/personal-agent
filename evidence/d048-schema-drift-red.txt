@@ -1,0 +1,114 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 test
+> vitest run test/d048-lazy-tools.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.1.0 [39m[90m/Users/stark/Desktop/新兴科创产业园 OPC/Agent-Harness/personal-agent[39m
+
+ [31m❯[39m test/d048-lazy-tools.test.ts [2m([22m[2m11 tests[22m[2m | [22m[31m3 failed[39m[2m)[22m[32m 17[2mms[22m[39m
+   [32m✓[39m D048 lazy tool 生命周期 [2m(4)[22m
+     [32m✓[39m 目录、检索和选中 Schema 都不实例化；有效执行时加载并缓存同一实例[32m 3[2mms[22m[39m
+     [32m✓[39m 异步 factory 的并发首次执行共享同一个加载 Promise[32m 0[2mms[22m[39m
+     [32m✓[39m factory 异常进入统一 ToolResult 边界、不泄露原错误，并可在后续调用重试[32m 1[2mms[22m[39m
+     [32m✓[39m factory 返回名称不匹配的工具时安全失败，不缓存错误实例[32m 0[2mms[22m[39m
+   [31m❯[39m D048 lazy tool Schema 契约门禁 [2m(4)[22m
+[31m     [31m×[31m description 漂移时 factory 已加载但业务 execute 不运行，返回可修复且不泄值的错误[39m[32m 4[2mms[22m[39m
+[31m     [31m×[31m parameters 漂移时 factory 已加载但业务 execute 不运行，返回可修复且不泄值的错误[39m[32m 1[2mms[22m[39m
+     [32m✓[39m parameters 仅对象 key 顺序不同但语义相同时正常执行并缓存[32m 0[2mms[22m[39m
+[31m     [31m×[31m 异步 factory 返回漂移 description 时同样受运行时门禁控制[39m[32m 1[2mms[22m[39m
+   [32m✓[39m D048 lazy tool 不绕过 Registry 安全顺序 [2m(3)[22m
+     [32m✓[39m 白名单或租户拒绝、JSON/Schema 错误、确认拒绝都不运行 factory[32m 0[2mms[22m[39m
+     [32m✓[39m 明确确认后才加载，已注册的 resilience 超时策略仍生效[32m 6[2mms[22m[39m
+     [32m✓[39m 搜索不可见不等于执行未授权：策略允许的直接调用仍按原语义执行[32m 0[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 3 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool Schema 契约门禁[2m > [22mdescription 漂移时 factory 已加载但业务 execute 不运行，返回可修复且不泄值的错误
+[31m[1mAssertionError[22m: expected { content: 'must-not-run' } to match object { isError: true, error: { …(4) } }
+(1 matching property omitted from actual)[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "error": {[39m
+[32m-     "code": "INTERNAL_ERROR",[39m
+[32m-     "hint": "请修正 factory 返回的 description，使其与注册 Schema 一致后重试",[39m
+[32m-     "message": "懒加载工具 description 与注册 Schema 不一致",[39m
+[32m-     "retryable": true,[39m
+[32m-   },[39m
+[32m-   "isError": true,[39m
+[31m+   "content": "must-not-run",[39m
+[2m  }[22m
+
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m120:20[22m[39m
+    [90m118|[39m     const result = await registry.execute(call('weather_current'), { w…
+    [90m119|[39m
+    [90m120|[39m     [34mexpect[39m(result)[33m.[39m[34mtoMatchObject[39m({
+    [90m   |[39m                    [31m^[39m
+    [90m121|[39m       isError[33m:[39m [35mtrue[39m[33m,[39m
+    [90m122|[39m       error[33m:[39m {
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool Schema 契约门禁[2m > [22mparameters 漂移时 factory 已加载但业务 execute 不运行，返回可修复且不泄值的错误
+[31m[1mAssertionError[22m: expected { content: 'must-not-run' } to match object { isError: true, error: { …(4) } }
+(1 matching property omitted from actual)[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "error": {[39m
+[32m-     "code": "INTERNAL_ERROR",[39m
+[32m-     "hint": "请修正 factory 返回的 parameters，使其与注册 Schema 一致后重试",[39m
+[32m-     "message": "懒加载工具 parameters 与注册 Schema 不一致",[39m
+[32m-     "retryable": true,[39m
+[32m-   },[39m
+[32m-   "isError": true,[39m
+[31m+   "content": "must-not-run",[39m
+[2m  }[22m
+
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m149:20[22m[39m
+    [90m147|[39m     const result = await registry.execute(call('weather_current'), { w…
+    [90m148|[39m
+    [90m149|[39m     [34mexpect[39m(result)[33m.[39m[34mtoMatchObject[39m({
+    [90m   |[39m                    [31m^[39m
+    [90m150|[39m       isError[33m:[39m [35mtrue[39m[33m,[39m
+    [90m151|[39m       error[33m:[39m {
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool Schema 契约门禁[2m > [22m异步 factory 返回漂移 description 时同样受运行时门禁控制
+[31m[1mAssertionError[22m: expected { content: 'must-not-run' } to match object { isError: true, error: { …(3) } }
+(1 matching property omitted from actual)[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "error": {[39m
+[32m-     "code": "INTERNAL_ERROR",[39m
+[32m-     "message": "懒加载工具 description 与注册 Schema 不一致",[39m
+[32m-     "retryable": true,[39m
+[32m-   },[39m
+[32m-   "isError": true,[39m
+[31m+   "content": "must-not-run",[39m
+[2m  }[22m
+
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m196:20[22m[39m
+    [90m194|[39m     const result = await registry.execute(call('weather_current'), { w…
+    [90m195|[39m
+    [90m196|[39m     [34mexpect[39m(result)[33m.[39m[34mtoMatchObject[39m({
+    [90m   |[39m                    [31m^[39m
+    [90m197|[39m       isError[33m:[39m [35mtrue[39m[33m,[39m
+    [90m198|[39m       error[33m:[39m {
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m8 passed[39m[22m[90m (11)[39m
+[2m   Start at [22m 11:58:01
+[2m   Duration [22m 140ms[2m (transform 46%, tests 32%, import 18%, worker 5%)[22m

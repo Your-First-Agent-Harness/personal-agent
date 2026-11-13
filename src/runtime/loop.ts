@@ -17,6 +17,8 @@ export interface AgentLoopOptions {
   readonly eventSink?: EventSink;
   readonly signal?: AbortSignal;
   readonly streaming?: boolean;
+  /** 每轮覆盖工具检索查询；省略时使用最新的 user 消息。 */
+  readonly getToolQuery?: (messages: readonly Message[], turn: number) => string;
 }
 
 export type StopReason = AgentStopReason;
@@ -59,8 +61,10 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
       return cancelled(turn);
     }
 
-    // 每轮重新发现：同一请求内保留快照，跨轮替换、注册和注销立即生效。
-    const tools = options.registry.list();
+    // 每轮重新发现：动态 Registry 按查询裁剪，普通 Registry 忽略查询并保持全量兼容。
+    const latestUserQuery = messages.findLast((message) => message.role === 'user')?.content ?? '';
+    const toolQuery = options.getToolQuery?.(messages, turn) ?? latestUserQuery;
+    const tools = options.registry.list(toolQuery);
     const requestMessages = buildContext(messages, options.maxContextChars ?? 24_000);
     const request = {
       messages: requestMessages,

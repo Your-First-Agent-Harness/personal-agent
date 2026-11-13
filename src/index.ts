@@ -1,7 +1,7 @@
 export const VERSION = '0.1.0';
 
 export type { ChatRequest, ChatResult, ModelProvider } from './adapters/model/provider.ts';
-export type { Tool, ToolContext } from './core/tool.ts';
+export type { Tool, ToolContext, ToolSchema } from './core/tool.ts';
 export { runG1Demo } from './demo/g1.ts';
 export type { G1DemoReport } from './demo/g1.ts';
 export { runD032Demo } from './demo/d032.ts';
@@ -20,8 +20,12 @@ export type {
   ToolRetryOptions,
 } from './tools/resilience.ts';
 export { ToolRegistry } from './tools/registry.ts';
+export { DynamicToolRegistry } from './tools/dynamic-registry.ts';
+export type { DynamicToolRegistryOptions } from './tools/dynamic-registry.ts';
+export { DEFAULT_TOOL_SEARCH_LIMIT, searchToolSchemas } from './tools/retrieval.ts';
 export type {
   SensitiveToolConfirmation,
+  ToolFactory,
   ToolConfirmationRequest,
   ToolDescriptor,
   ToolMetadata,
@@ -62,3 +66,5 @@ export { runD044Demo } from './demo/d044.ts';
 export type { D044DemoReport } from './demo/d044.ts';
 export { runD046Demo } from './demo/d046.ts';
 export type { D046DemoItem, D046DemoReport } from './demo/d046.ts';
+export { runD048Demo } from './demo/d048.ts';
+export type { D048DemoReport, D048RequestReport } from './demo/d048.ts';

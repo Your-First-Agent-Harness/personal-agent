@@ -1,0 +1,268 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.1.0 [39m[90m/Users/stark/Desktop/新兴科创产业园 OPC/Agent-Harness/personal-agent[39m
+
+ [31m❯[39m test/d048-demo.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 4[2mms[22m[39m
+   [31m❯[39m D048 动态工具检索离线 Demo [2m(1)[22m
+[31m     [31m×[31m 真实 AgentLoop 只接收检索子集，按需加载并回喂真实天气结果[39m[32m 3[2mms[22m[39m
+ [31m❯[39m test/d048-loop.test.ts [2m([22m[2m2 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 4[2mms[22m[39m
+   [31m❯[39m D048 AgentLoop 动态工具子集集成 [2m(2)[22m
+[31m     [31m×[31m 每轮按明确查询重新检索，先前发现的工具仍可执行且完整结果回喂[39m[32m 3[2mms[22m[39m
+[31m     [31m×[31m 默认使用最新用户消息作为每轮检索查询，空用户查询不下发工具[39m[32m 0[2mms[22m[39m
+ [31m❯[39m test/d048-lazy-tools.test.ts [2m([22m[2m7 tests[22m[2m | [22m[31m7 failed[39m[2m)[22m[32m 5[2mms[22m[39m
+   [31m❯[39m D048 lazy tool 生命周期 [2m(4)[22m
+[31m     [31m×[31m 目录、检索和选中 Schema 都不实例化；有效执行时加载并缓存同一实例[39m[32m 3[2mms[22m[39m
+[31m     [31m×[31m 异步 factory 的并发首次执行共享同一个加载 Promise[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m factory 异常进入统一 ToolResult 边界、不泄露原错误，并可在后续调用重试[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m factory 返回名称不匹配的工具时安全失败，不缓存错误实例[39m[32m 0[2mms[22m[39m
+   [31m❯[39m D048 lazy tool 不绕过 Registry 安全顺序 [2m(3)[22m
+[31m     [31m×[31m 白名单或租户拒绝、JSON/Schema 错误、确认拒绝都不运行 factory[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 明确确认后才加载，已注册的 resilience 超时策略仍生效[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 搜索不可见不等于执行未授权：策略允许的直接调用仍按原语义执行[39m[32m 0[2mms[22m[39m
+ [31m❯[39m test/d048-tool-retrieval.test.ts [2m([22m[2m7 tests[22m[2m | [22m[31m6 failed[39m[2m)[22m[32m 8[2mms[22m[39m
+   [31m❯[39m D048 确定性词法工具检索 [2m(4)[22m
+[31m     [31m×[31m 名称命中排在仅描述命中之前，重复词不会重复计分[39m[32m 4[2mms[22m[39m
+[31m     [31m×[31m 支持英文工具名分词、大小写归一和基本中文连续文本[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m 同分保持目录顺序，limit 截断且默认最多返回五项[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 空查询、无匹配与零 limit 返回空数组，非法 limit 明确拒绝[39m[32m 1[2mms[22m[39m
+   [31m❯[39m D048 DynamicToolRegistry 目录与策略 [2m(3)[22m
+[31m     [31m×[31m catalog 保留全量策略可见 Schema，list 只返回查询子集且不加载 eager 以外的行为[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 检索发生在 allowlist 与 tenant 过滤之后，不暴露其他主体目录[39m[32m 0[2mms[22m[39m
+     [32m✓[39m 普通 ToolRegistry 忽略可选查询并继续返回全量，旧 Tool[] 用法不变[32m 0[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 16 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m test/d048-demo.test.ts[2m > [22mD048 动态工具检索离线 Demo[2m > [22m真实 AgentLoop 只接收检索子集，按需加载并回喂真实天气结果
+[31m[1mError[22m: D048 Demo 尚未实现[39m
+[36m [2m❯[22m runD048Demo src/demo/d048.ts:[2m2:9[22m[39m
+    [90m  1|[39m export async function runD048Demo(_output: (line: string) => void): Pr…
+    [90m  2|[39m   [35mthrow[39m [35mnew[39m [33mError[39m([32m'D048 Demo 尚未实现'[39m)[33m;[39m
+    [90m   |[39m         [31m^[39m
+    [90m  3|[39m }
+    [90m  4|[39m
+[90m [2m❯[22m test/d048-demo.test.ts:[2m8:26[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool 生命周期[2m > [22m目录、检索和选中 Schema 都不实例化；有效执行时加载并缓存同一实例
+[31m[1mTypeError[22m: registry.registerLazy is not a function[39m
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m33:14[22m[39m
+    [90m 31|[39m     [35mconst[39m factory [33m=[39m vi[33m.[39m[34mfn[39m(() [33m=>[39m [34mweatherTool[39m(execute))[33m;[39m
+    [90m 32|[39m     [35mconst[39m registry [33m=[39m [35mnew[39m [33mDynamicToolRegistry[39m()[33m;[39m
+    [90m 33|[39m     registry[33m.[39m[34mregisterLazy[39m(weatherSchema[33m,[39m factory)[33m;[39m
+    [90m   |[39m              [31m^[39m
+    [90m 34|[39m
+    [90m 35|[39m     [34mexpect[39m(registry[33m.[39m[34mcatalog[39m())[33m.[39m[34mtoHaveLength[39m([34m1[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool 生命周期[2m > [22m异步 factory 的并发首次执行共享同一个加载 Promise
+[31m[1mTypeError[22m: registry.registerLazy is not a function[39m
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m58:14[22m[39m
+    [90m 56|[39m     })[33m;[39m
+    [90m 57|[39m     [35mconst[39m registry [33m=[39m [35mnew[39m [33mToolRegistry[39m()[33m;[39m
+    [90m 58|[39m     registry[33m.[39m[34mregisterLazy[39m(weatherSchema[33m,[39m factory)[33m;[39m
+    [90m   |[39m              [31m^[39m
+    [90m 59|[39m
+    [90m 60|[39m     [35mconst[39m results [33m=[39m [35mawait[39m [33mPromise[39m[33m.[39m[34mall[39m([
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool 生命周期[2m > [22mfactory 异常进入统一 ToolResult 边界、不泄露原错误，并可在后续调用重试
+[31m[1mTypeError[22m: registry.registerLazy is not a function[39m
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m75:14[22m[39m
+    [90m 73|[39m       [33m.[39m[34mmockResolvedValueOnce[39m([34mweatherTool[39m())[33m;[39m
+    [90m 74|[39m     [35mconst[39m registry [33m=[39m [35mnew[39m [33mToolRegistry[39m()[33m;[39m
+    [90m 75|[39m     registry[33m.[39m[34mregisterLazy[39m(weatherSchema[33m,[39m factory)[33m;[39m
+    [90m   |[39m              [31m^[39m
+    [90m 76|[39m
+    [90m 77|[39m     const failed = await registry.execute(call('weather_current', { ci…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool 生命周期[2m > [22mfactory 返回名称不匹配的工具时安全失败，不缓存错误实例
+[31m[1mTypeError[22m: registry.registerLazy is not a function[39m
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m99:14[22m[39m
+    [90m 97|[39m       .mockReturnValueOnce({ ...weatherTool(), name: 'different_tool' …
+    [90m 98|[39m       [33m.[39m[34mmockReturnValueOnce[39m([34mweatherTool[39m())[33m;[39m
+    [90m 99|[39m     registry[33m.[39m[34mregisterLazy[39m(weatherSchema[33m,[39m factory)[33m;[39m
+    [90m   |[39m              [31m^[39m
+    [90m100|[39m
+    [90m101|[39m     const mismatch = await registry.execute(call('weather_current'), {…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool 不绕过 Registry 安全顺序[2m > [22m白名单或租户拒绝、JSON/Schema 错误、确认拒绝都不运行 factory
+[31m[1mTypeError[22m: registry.registerLazy is not a function[39m
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m120:14[22m[39m
+    [90m118|[39m     [35mconst[39m allowedFactory [33m=[39m vi[33m.[39m[34mfn[39m(() [33m=>[39m [34mweatherTool[39m())[33m;[39m
+    [90m119|[39m     [35mconst[39m hiddenFactory [33m=[39m vi[33m.[39m[34mfn[39m(() [33m=>[39m [34mweatherTool[39m())[33m;[39m
+    [90m120|[39m     registry.registerLazy(weatherSchema, allowedFactory, { sensitive: …
+    [90m   |[39m              [31m^[39m
+    [90m121|[39m     registry[33m.[39m[34mregisterLazy[39m(
+    [90m122|[39m       { [33m...[39mweatherSchema[33m,[39m name[33m:[39m [32m'tenant_secret'[39m }[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool 不绕过 Registry 安全顺序[2m > [22m明确确认后才加载，已注册的 resilience 超时策略仍生效
+[31m[1mTypeError[22m: registry.registerLazy is not a function[39m
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m160:14[22m[39m
+    [90m158|[39m       execute[33m:[39m () [33m=>[39m [35mnew[39m [33mPromise[39m(() [33m=>[39m {})[33m,[39m
+    [90m159|[39m     }))[33m;[39m
+    [90m160|[39m     registry.registerLazy(weatherSchema, factory, { sensitive: true, r…
+    [90m   |[39m              [31m^[39m
+    [90m161|[39m
+    [90m162|[39m     const denied = await registry.execute(call('weather_current', { ci…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-lazy-tools.test.ts[2m > [22mD048 lazy tool 不绕过 Registry 安全顺序[2m > [22m搜索不可见不等于执行未授权：策略允许的直接调用仍按原语义执行
+[31m[1mTypeError[22m: registry.registerLazy is not a function[39m
+[36m [2m❯[22m test/d048-lazy-tools.test.ts:[2m179:14[22m[39m
+    [90m177|[39m     [35mconst[39m registry [33m=[39m [35mnew[39m [33mDynamicToolRegistry[39m()[33m;[39m
+    [90m178|[39m     [35mconst[39m factory [33m=[39m vi[33m.[39m[34mfn[39m(() [33m=>[39m [34mweatherTool[39m())[33m;[39m
+    [90m179|[39m     registry[33m.[39m[34mregisterLazy[39m(weatherSchema[33m,[39m factory)[33m;[39m
+    [90m   |[39m              [31m^[39m
+    [90m180|[39m
+    [90m181|[39m     [34mexpect[39m(registry[33m.[39m[34mlist[39m([32m'日程'[39m))[33m.[39m[34mtoEqual[39m([])[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-loop.test.ts[2m > [22mD048 AgentLoop 动态工具子集集成[2m > [22m每轮按明确查询重新检索，先前发现的工具仍可执行且完整结果回喂
+[31m[1mTypeError[22m: registry.registerLazy is not a function[39m
+[36m [2m❯[22m test/d048-loop.test.ts:[2m25:14[22m[39m
+    [90m 23|[39m       execute[33m:[39m () [33m=>[39m [33mPromise[39m[33m.[39m[34mresolve[39m({ content[33m:[39m [32m'calendar-created'[39m })[33m,[39m
+    [90m 24|[39m     }))[33m;[39m
+    [90m 25|[39m     registry.registerLazy(lazySchema('weather_current', '查询当前天气'), wea…
+    [90m   |[39m              [31m^[39m
+    [90m 26|[39m     registry.registerLazy(lazySchema('calendar_create', '创建日程'), calen…
+    [90m 27|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-loop.test.ts[2m > [22mD048 AgentLoop 动态工具子集集成[2m > [22m默认使用最新用户消息作为每轮检索查询，空用户查询不下发工具
+[31m[1mTypeError[22m: registry.registerLazy is not a function[39m
+[36m [2m❯[22m test/d048-loop.test.ts:[2m85:14[22m[39m
+    [90m 83|[39m   [34mit[39m([32m'默认使用最新用户消息作为每轮检索查询，空用户查询不下发工具'[39m[33m,[39m [35masync[39m () [33m=>[39m {
+    [90m 84|[39m     [35mconst[39m registry [33m=[39m [35mnew[39m [33mDynamicToolRegistry[39m()[33m;[39m
+    [90m 85|[39m     registry.registerLazy(lazySchema('weather_current', '查询当前天气'), () …
+    [90m   |[39m              [31m^[39m
+    [90m 86|[39m       [33m...[39m[34mlazySchema[39m([32m'weather_current'[39m[33m,[39m [32m'查询当前天气'[39m)[33m,[39m
+    [90m 87|[39m       execute[33m:[39m () [33m=>[39m [33mPromise[39m[33m.[39m[34mresolve[39m({ content[33m:[39m [32m'sunny'[39m })[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-tool-retrieval.test.ts[2m > [22mD048 确定性词法工具检索[2m > [22m名称命中排在仅描述命中之前，重复词不会重复计分
+[31m[1mAssertionError[22m: expected [] to deeply equal [ 'weather', 'unrelated_helper' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- [[39m
+[32m-   "weather",[39m
+[32m-   "unrelated_helper",[39m
+[32m- ][39m
+[31m+ [][39m
+
+[36m [2m❯[22m test/d048-tool-retrieval.test.ts:[2m30:45[22m[39m
+    [90m 28|[39m     const repeated = searchToolSchemas(catalog, 'weather weather WEATH…
+    [90m 29|[39m
+    [90m 30|[39m     expect(once.map((entry) => entry.name)).toEqual(['weather', 'unrel…
+    [90m   |[39m                                             [31m^[39m
+    [90m 31|[39m     [34mexpect[39m(repeated)[33m.[39m[34mtoEqual[39m(once)[33m;[39m
+    [90m 32|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-tool-retrieval.test.ts[2m > [22mD048 确定性词法工具检索[2m > [22m支持英文工具名分词、大小写归一和基本中文连续文本
+[31m[1mAssertionError[22m: expected [] to deeply equal [ 'weather_current' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- [[39m
+[32m-   "weather_current",[39m
+[32m- ][39m
+[31m+ [][39m
+
+[36m [2m❯[22m test/d048-tool-retrieval.test.ts:[2m41:78[22m[39m
+    [90m 39|[39m     ][33m;[39m
+    [90m 40|[39m
+    [90m 41|[39m     expect(searchToolSchemas(catalog, 'WEATHER').map((entry) => entry.…
+    [90m   |[39m                                                                              [31m^[39m
+    [90m 42|[39m       [32m'weather_current'[39m[33m,[39m
+    [90m 43|[39m     ])[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-tool-retrieval.test.ts[2m > [22mD048 确定性词法工具检索[2m > [22m同分保持目录顺序，limit 截断且默认最多返回五项
+[31m[1mAssertionError[22m: expected [] to deeply equal [ 'tool_0', 'tool_1', 'tool_2' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- [[39m
+[32m-   "tool_0",[39m
+[32m-   "tool_1",[39m
+[32m-   "tool_2",[39m
+[32m- ][39m
+[31m+ [][39m
+
+[36m [2m❯[22m test/d048-tool-retrieval.test.ts:[2m56:84[22m[39m
+    [90m 54|[39m       [34mschema[39m([32m`tool_[39m[36m${[39mindex[36m}[39m[32m`[39m[33m,[39m [32m'共同 searchable 描述'[39m))[33m;[39m
+    [90m 55|[39m
+    [90m 56|[39m     expect(searchToolSchemas(catalog, 'searchable', 3).map((entry) => …
+    [90m   |[39m                                                                                    [31m^[39m
+    [90m 57|[39m       [32m'tool_0'[39m[33m,[39m [32m'tool_1'[39m[33m,[39m [32m'tool_2'[39m[33m,[39m
+    [90m 58|[39m     ])[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-tool-retrieval.test.ts[2m > [22mD048 确定性词法工具检索[2m > [22m空查询、无匹配与零 limit 返回空数组，非法 limit 明确拒绝
+[31m[1mAssertionError[22m: expected [Function] to throw an error[39m
+
+[32m- Expected:[39m
+null
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d048-tool-retrieval.test.ts:[2m70:61[22m[39m
+    [90m 68|[39m     [34mexpect[39m([34msearchToolSchemas[39m(catalog[33m,[39m [32m'天气'[39m[33m,[39m [34m0[39m))[33m.[39m[34mtoEqual[39m([])[33m;[39m
+    [90m 69|[39m     for (const limit of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY…
+    [90m 70|[39m       expect(() => searchToolSchemas(catalog, '天气', limit)).toThrow('非…
+    [90m   |[39m                                                             [31m^[39m
+    [90m 71|[39m     }
+    [90m 72|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-tool-retrieval.test.ts[2m > [22mD048 DynamicToolRegistry 目录与策略[2m > [22mcatalog 保留全量策略可见 Schema，list 只返回查询子集且不加载 eager 以外的行为
+[31m[1mTypeError[22m: registry.catalog is not a function[39m
+[36m [2m❯[22m test/d048-tool-retrieval.test.ts:[2m81:21[22m[39m
+    [90m 79|[39m     registry[33m.[39m[34mregister[39m([34mtool[39m([32m'calendar_create'[39m[33m,[39m [32m'创建日程'[39m))[33m;[39m
+    [90m 80|[39m
+    [90m 81|[39m     [34mexpect[39m(registry[33m.[39m[34mcatalog[39m()[33m.[39m[34mmap[39m((entry) [33m=>[39m entry[33m.[39mname))[33m.[39m[34mtoEqual[39m([
+    [90m   |[39m                     [31m^[39m
+    [90m 82|[39m       [32m'weather_current'[39m[33m,[39m [32m'calendar_create'[39m[33m,[39m
+    [90m 83|[39m     ])[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/16]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d048-tool-retrieval.test.ts[2m > [22mD048 DynamicToolRegistry 目录与策略[2m > [22m检索发生在 allowlist 与 tenant 过滤之后，不暴露其他主体目录
+[31m[1mTypeError[22m: registry.catalog is not a function[39m
+[36m [2m❯[22m test/d048-tool-retrieval.test.ts:[2m100:21[22m[39m
+    [90m 98|[39m     registry[33m.[39m[34mregister[39m([34mtool[39m([32m'denied_weather'[39m[33m,[39m [32m'白名单外天气'[39m))[33m;[39m
+    [90m 99|[39m
+    [90m100|[39m     [34mexpect[39m(registry[33m.[39m[34mcatalog[39m()[33m.[39m[34mmap[39m((entry) [33m=>[39m entry[33m.[39mname))[33m.[39m[34mtoEqual[39m([
+    [90m   |[39m                     [31m^[39m
+    [90m101|[39m       [32m'shared_weather'[39m[33m,[39m [32m'tenant_weather'[39m[33m,[39m
+    [90m102|[39m     ])[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/16]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m4 failed[39m[22m[90m (4)[39m
+[2m      Tests [22m [1m[31m16 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[90m (17)[39m
+[2m   Start at [22m 11:24:13
+[2m   Duration [22m 207ms[2m (transform 67%, import 19%, tests 10%, worker 5%)[22m
