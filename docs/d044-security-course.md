@@ -87,7 +87,7 @@ allow(call, rule) =
 - 结果如何：exitCode、signal；
 - 消耗/清理如何：timeout、输出预算与保留字节、截断、清理。
 
-允许调用先写 decision，再执行，最后写 completion。拒绝调用的 decision 已是最终记录。只有“参数已脱敏”的日志没有足够追溯力。
+允许调用先写 decision，再执行，最后写 completion。D046 起，拒绝调用也写 decision + completion，二者均明确 denied，未创建沙箱或进程。只有“参数已脱敏”的日志没有足够追溯力。
 
 SHA-256 只是参数摘要，不是加密；低熵秘密仍可能被枚举。敏感值应替换，且原始错误、环境、stdout/stderr 也不能被忽略。
 
@@ -97,10 +97,11 @@ SHA-256 只是参数摘要，不是加密；低熵秘密仍可能被枚举。敏
 
 ```text
 decision 写失败 → 不启动
-completion 写失败 → 显式失败，但已执行副作用不可回滚
+允许命令的 completion 写失败 → 显式失败，但已执行副作用不可回滚
+拒绝命令的 completion 写失败 → 显式失败，命令仍未启动
 ```
 
-第二种情况尤其重要：返回 `AUDIT_WRITE_FAILED` 不等于命令没运行，也不等于 marker 被撤销。测试故意证明 completion 失败时 marker 已存在，防止用日志结果重写现实。
+允许命令的 completion 失败尤其重要：返回 `AUDIT_WRITE_FAILED` 不等于命令没运行，也不等于 marker 被撤销。测试故意证明 completion 失败时 marker 已存在，防止用日志结果重写现实。
 
 JSONL 在实例内串行 append，一次失败不会被吞掉，也不会阻塞后续写入链。但它不是分布式事务、防篡改存储或断电持久化保证。
 

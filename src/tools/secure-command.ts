@@ -31,6 +31,8 @@ export interface SecureCommandToolOptions {
   clock?: () => Date;
   idGenerator?: () => string;
   monotonicClock?: () => number;
+  /** 默认使用 Node spawn；显式注入可用于正向进程启动计数与受控测试。 */
+  spawnImplementation?: typeof spawn;
 }
 
 export interface SecureCommandResult {
@@ -212,6 +214,7 @@ async function runProcess(
   sandboxRoot: string,
   resources: RequiredResources,
   redact: (text: string) => string,
+  spawnImplementation: typeof spawn,
   signal?: AbortSignal,
 ): Promise<ProcessOutcome> {
   const empty: ProcessOutcome = {
@@ -233,7 +236,7 @@ async function runProcess(
   return new Promise<ProcessOutcome>((resolve) => {
     let child: ReturnType<typeof spawn>;
     try {
-      child = spawn(executable, input.args, {
+      child = spawnImplementation(executable, input.args, {
         cwd: sandboxRoot,
         shell: false,
         env: { LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8' },
@@ -414,6 +417,7 @@ export function createSecureCommandTool(options: SecureCommandToolOptions): Tool
   const idGenerator = options.idGenerator ?? randomUUID;
   const now = options.monotonicClock ?? (() => performance.now());
   const admission = createAdmission(resources);
+  const spawnImplementation = options.spawnImplementation ?? spawn;
 
   const auditRecord = (
     input: CommandInput,
@@ -517,6 +521,14 @@ export function createSecureCommandTool(options: SecureCommandToolOptions): Tool
         } catch {
           return auditFailure('decision');
         }
+        const completion = auditRecord(
+          input, operationId, 'completion', null, 'denied', 'COMMAND_NOT_ALLOWED', started,
+        );
+        try {
+          await options.auditSink.append(completion);
+        } catch {
+          return toolError('AUDIT_WRITE_FAILED', '拒绝决策的完成审计写入失败；命令未启动', false);
+        }
         return toolError('COMMAND_NOT_ALLOWED', '命令不在精确 executable+argv 白名单内；未创建沙箱或子进程', false);
       }
 
@@ -552,7 +564,7 @@ export function createSecureCommandTool(options: SecureCommandToolOptions): Tool
         let outcome: ProcessOutcome;
         try {
           outcome = await runProcess(
-            executable as string, input, sandboxRoot, resources, redact, context.signal,
+            executable as string, input, sandboxRoot, resources, redact, spawnImplementation, context.signal,
           );
         } finally {
           try {

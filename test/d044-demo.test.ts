@@ -23,7 +23,7 @@ describe('D044 安全加固 Demo', () => {
       fakeSecretRedacted: true,
       hostRootRemoved: true,
     });
-    expect(records).toHaveLength(8);
+    expect(records).toHaveLength(10);
     expect(records.some((record) => record.status === 'succeeded' && record.resultCode === 'OK')).toBe(true);
     expect(records.some((record) => record.status === 'denied')).toBe(true);
     expect(records.some((record) => record.resultCode === 'COMMAND_OUTPUT_LIMIT')).toBe(true);
