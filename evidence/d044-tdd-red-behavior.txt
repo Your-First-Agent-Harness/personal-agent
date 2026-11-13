@@ -1,0 +1,407 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.1.0 [39m[90m/Users/stark/Desktop/新兴科创产业园 OPC/Agent-Harness/personal-agent[39m
+
+ [31m❯[39m test/d044-demo.test.ts [2m([22m[2m1 test[22m[2m | [22m[31m1 failed[39m[2m)[22m[32m 3[2mms[22m[39m
+   [31m❯[39m D044 安全加固 Demo [2m(1)[22m
+[31m     [31m×[31m 真实展示允许、启动前拒绝、资源限制、fail-closed 与脱敏审计[39m[32m 2[2mms[22m[39m
+ [31m❯[39m test/d044-audit-sink.test.ts [2m([22m[2m2 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 5[2mms[22m[39m
+   [31m❯[39m D044 JSONL AuditSink [2m(2)[22m
+[31m     [31m×[31m 并发 append 串行落盘，每条记录恰好一行且保留确定性字段[39m[32m 3[2mms[22m[39m
+[31m     [31m×[31m 一次写失败不会毒化后续串行写入，也不会被静默吞掉[39m[32m 1[2mms[22m[39m
+ [31m❯[39m test/d044-secure-command.test.ts [2m([22m[2m35 tests[22m[2m | [22m[31m35 failed[39m[2m)[22m[33m 15036[2mms[22m[39m
+   [31m❯[39m D044 精确 argv 白名单与无 shell 执行 [2m(18)[22m
+[31m     [31m×[31m 允许规则真实执行、使用一次性 cwd、不继承宿主 env 并记录两段审计[39m[32m 3[2mms[22m[39m
+[31m     [31m×[31m 未白名单的绝对路径宿主写在 spawn 前拒绝，危险 marker 不存在[39m[32m 2[2mms[22m[39m
+[31m     [31m×[31m 精确 argv 后的 shell 元字符后缀 ; 不会改变允许决策[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 精确 argv 后的 shell 元字符后缀 > 不会改变允许决策[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 精确 argv 后的 shell 元字符后缀 | 不会改变允许决策[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 精确 argv 后的 shell 元字符后缀 $(touch subshell-marker) 不会改变允许决策[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 精确 argv 后的 shell 元字符后缀 `touch backtick-marker` 不会改变允许决策[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 即使白名单参数本身含元字符，也只作为字面 argv 传递而不解释[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 真实非零退出保留 stdout/stderr/exitCode，completion 审计为失败[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法结构化输入安全拒绝：null[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法结构化输入安全拒绝：undefined[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法结构化输入安全拒绝：{}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法结构化输入安全拒绝：{"executable":"node","args":[]}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法结构化输入安全拒绝：{"executable":"/Users/stark/.nvm/versions/node/v24.19.0/bin/node","args":"not-array"}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法结构化输入安全拒绝：{"executable":"/Users/stark/.nvm/versions/node/v24.19.0/bin/node","args":["ok",42]}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法结构化输入安全拒绝：{"executable":"/Users/stark/.nvm/versions/node/v24.19.0/bin/node","args":["bad\u0000arg"]}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法结构化输入安全拒绝：{"executable":"/Users/stark/.nvm/versions/node/v24.19.0/bin/node","args":[],"extra":true}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m Schema 和公共导出明确只接受结构化 executable/args[39m[32m 1[2mms[22m[39m
+   [31m❯[39m D044 资源预算与排队取消 [2m(14)[22m
+[31m     [31m×[31m wall timeout 终止真实进程并记录耗时、signal 与资源审计[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m stdout/stderr 共用字节预算，多字节输出超限会终止而非无限截断[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m maxConcurrent=1 且 maxQueue=0 时第二调用在启动前拒绝[39m[33m 5004[2mms[22m[39m
+[31m     [31m×[31m 排队调用可取消并被移除，后续有界等待者仍能获得许可[39m[33m 5006[2mms[22m[39m
+[31m     [31m×[31m 排队超过 maxQueueWaitMs 返回资源错误而不是无界等待[39m[33m 5005[2mms[22m[39m
+[31m     [31m×[31m 预先取消的允许调用不会创建沙箱或进程，但有取消完成审计[39m[32m 2[2mms[22m[39m
+[31m     [31m×[31m 非法资源配置在工厂边界抛错：{"defaultTimeoutMs":0}[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m 非法资源配置在工厂边界抛错：{"defaultTimeoutMs":20,"maxTimeoutMs":10}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法资源配置在工厂边界抛错：{"maxTimeoutMs":1.5}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法资源配置在工厂边界抛错：{"maxOutputBytes":0}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法资源配置在工厂边界抛错：{"maxConcurrent":0}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 非法资源配置在工厂边界抛错：{"maxQueue":-1}[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m 非法资源配置在工厂边界抛错：{"maxQueueWaitMs":0}[39m[32m 0[2mms[22m[39m
+[31m     [31m×[31m 空白名单默认全拒绝；相对规则路径、重复 id 和 NUL 配置不可构造[39m[32m 1[2mms[22m[39m
+   [31m❯[39m D044 审计 fail-closed 语义 [2m(3)[22m
+[31m     [31m×[31m decision 审计写失败时不启动允许命令[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m 拒绝决策的审计写失败也显式报 AUDIT_WRITE_FAILED，且绝不执行[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m completion 审计失败显式报错但不谎称已执行操作可回滚[39m[32m 1[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 38 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m test/d044-audit-sink.test.ts[2m > [22mD044 JSONL AuditSink[2m > [22m并发 append 串行落盘，每条记录恰好一行且保留确定性字段
+[31m[1mError[22m: NOT_IMPLEMENTED[39m
+[36m [2m❯[22m Object.append src/observability/audit-sink.ts:[2m40:34[22m[39m
+    [90m 38|[39m export function createJsonlAuditSink(_options: JsonlAuditSinkOptions):…
+    [90m 39|[39m   [35mreturn[39m {
+    [90m 40|[39m     append[33m:[39m () [33m=>[39m [33mPromise[39m[33m.[39m[34mreject[39m([35mnew[39m [33mError[39m([32m'NOT_IMPLEMENTED'[39m))[33m,[39m
+    [90m   |[39m                                  [31m^[39m
+    [90m 41|[39m   }[33m;[39m
+    [90m 42|[39m }
+[90m [2m❯[22m test/d044-audit-sink.test.ts:[2m64:29[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-audit-sink.test.ts[2m > [22mD044 JSONL AuditSink[2m > [22m一次写失败不会毒化后续串行写入，也不会被静默吞掉
+[31m[1mError[22m: NOT_IMPLEMENTED[39m
+[36m [2m❯[22m Object.append src/observability/audit-sink.ts:[2m40:34[22m[39m
+    [90m 38|[39m export function createJsonlAuditSink(_options: JsonlAuditSinkOptions):…
+    [90m 39|[39m   [35mreturn[39m {
+    [90m 40|[39m     append[33m:[39m () [33m=>[39m [33mPromise[39m[33m.[39m[34mreject[39m([35mnew[39m [33mError[39m([32m'NOT_IMPLEMENTED'[39m))[33m,[39m
+    [90m   |[39m                                  [31m^[39m
+    [90m 41|[39m   }[33m;[39m
+    [90m 42|[39m }
+[90m [2m❯[22m test/d044-audit-sink.test.ts:[2m83:16[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-demo.test.ts[2m > [22mD044 安全加固 Demo[2m > [22m真实展示允许、启动前拒绝、资源限制、fail-closed 与脱敏审计
+[31m[1mError[22m: NOT_IMPLEMENTED[39m
+[36m [2m❯[22m runD044Demo src/demo/d044.ts:[2m16:25[22m[39m
+    [90m 14|[39m
+    [90m 15|[39m export function runD044Demo(_output: (line: string) => void): Promise<…
+    [90m 16|[39m   [35mreturn[39m [33mPromise[39m[33m.[39m[34mreject[39m([35mnew[39m [33mError[39m([32m'NOT_IMPLEMENTED'[39m))[33m;[39m
+    [90m   |[39m                         [31m^[39m
+    [90m 17|[39m }
+    [90m 18|[39m
+[90m [2m❯[22m test/d044-demo.test.ts:[2m9:26[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m允许规则真实执行、使用一次性 cwd、不继承宿主 env 并记录两段审计
+[31m[1mSyntaxError[22m: Unexpected token 'N', "NOT_IMPLEMENTED" is not valid JSON[39m
+[36m [2m❯[22m parse test/d044-secure-command.test.ts:[2m59:15[22m[39m
+    [90m 57|[39m
+    [90m 58|[39m [35mfunction[39m [34mparse[39m(result[33m:[39m { content[33m:[39m string })[33m:[39m [33mSecureCommandResult[39m {
+    [90m 59|[39m   [35mreturn[39m [33mJSON[39m[33m.[39m[34mparse[39m(result[33m.[39mcontent) [35mas[39m [33mSecureCommandResult[39m[33m;[39m
+    [90m   |[39m               [31m^[39m
+    [90m 60|[39m }
+    [90m 61|[39m
+[90m [2m❯[22m test/d044-secure-command.test.ts:[2m95:23[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m未白名单的绝对路径宿主写在 spawn 前拒绝，危险 marker 不存在
+[31m[1mAssertionError[22m: expected undefined to be 'COMMAND_NOT_ALLOWED' // Object.is equality[39m
+
+[32m- Expected:[39m
+"COMMAND_NOT_ALLOWED"
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m134:32[22m[39m
+    [90m132|[39m     )[33m;[39m
+    [90m133|[39m
+    [90m134|[39m     [34mexpect[39m(result[33m.[39merror[33m?.[39mcode)[33m.[39m[34mtoBe[39m([32m'COMMAND_NOT_ALLOWED'[39m)[33m;[39m
+    [90m   |[39m                                [31m^[39m
+    [90m135|[39m     [34mexpect[39m([34mexistsSync[39m(marker))[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m136|[39m     [34mexpect[39m([34mreaddirSync[39m(root))[33m.[39m[34mtoEqual[39m([])[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m精确 argv 后的 shell 元字符后缀 ; 不会改变允许决策
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m精确 argv 后的 shell 元字符后缀 > 不会改变允许决策
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m精确 argv 后的 shell 元字符后缀 | 不会改变允许决策
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m精确 argv 后的 shell 元字符后缀 $(touch subshell-marker) 不会改变允许决策
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m精确 argv 后的 shell 元字符后缀 `touch backtick-marker` 不会改变允许决策
+[31m[1mAssertionError[22m: expected undefined to be 'COMMAND_NOT_ALLOWED' // Object.is equality[39m
+
+[32m- Expected:[39m
+"COMMAND_NOT_ALLOWED"
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m161:34[22m[39m
+    [90m159|[39m       )[33m;[39m
+    [90m160|[39m
+    [90m161|[39m       [34mexpect[39m(result[33m.[39merror[33m?.[39mcode)[33m.[39m[34mtoBe[39m([32m'COMMAND_NOT_ALLOWED'[39m)[33m;[39m
+    [90m   |[39m                                  [31m^[39m
+    [90m162|[39m       [34mexpect[39m([34mexistsSync[39m(marker))[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m163|[39m       [34mexpect[39m([34mreaddirSync[39m(root))[33m.[39m[34mtoEqual[39m([])[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m即使白名单参数本身含元字符，也只作为字面 argv 传递而不解释
+[31m[1mAssertionError[22m: expected true to be undefined[39m
+
+[32m- Expected:[39m
+undefined
+
+[31m+ Received:[39m
+true
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m180:28[22m[39m
+    [90m178|[39m     )[33m;[39m
+    [90m179|[39m
+    [90m180|[39m     [34mexpect[39m(result[33m.[39misError)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m   |[39m                            [31m^[39m
+    [90m181|[39m     [34mexpect[39m([34mparse[39m(result)[33m.[39mstdout)[33m.[39m[34mtoBe[39m(literal)[33m;[39m
+    [90m182|[39m     [34mexpect[39m([34mexistsSync[39m(marker))[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m真实非零退出保留 stdout/stderr/exitCode，completion 审计为失败
+[31m[1mSyntaxError[22m: Unexpected token 'N', "NOT_IMPLEMENTED" is not valid JSON[39m
+[36m [2m❯[22m parse test/d044-secure-command.test.ts:[2m59:15[22m[39m
+    [90m 57|[39m
+    [90m 58|[39m [35mfunction[39m [34mparse[39m(result[33m:[39m { content[33m:[39m string })[33m:[39m [33mSecureCommandResult[39m {
+    [90m 59|[39m   [35mreturn[39m [33mJSON[39m[33m.[39m[34mparse[39m(result[33m.[39mcontent) [35mas[39m [33mSecureCommandResult[39m[33m;[39m
+    [90m   |[39m               [31m^[39m
+    [90m 60|[39m }
+    [90m 61|[39m
+[90m [2m❯[22m test/d044-secure-command.test.ts:[2m194:21[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m非法结构化输入安全拒绝：null
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m非法结构化输入安全拒绝：undefined
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m非法结构化输入安全拒绝：{}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m非法结构化输入安全拒绝：{"executable":"node","args":[]}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m非法结构化输入安全拒绝：{"executable":"/Users/stark/.nvm/versions/node/v24.19.0/bin/node","args":"not-array"}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m非法结构化输入安全拒绝：{"executable":"/Users/stark/.nvm/versions/node/v24.19.0/bin/node","args":["ok",42]}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m非法结构化输入安全拒绝：{"executable":"/Users/stark/.nvm/versions/node/v24.19.0/bin/node","args":["bad\u0000arg"]}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22m非法结构化输入安全拒绝：{"executable":"/Users/stark/.nvm/versions/node/v24.19.0/bin/node","args":[],"extra":true}
+[31m[1mAssertionError[22m: expected undefined to be 'INVALID_ARGUMENTS' // Object.is equality[39m
+
+[32m- Expected:[39m
+"INVALID_ARGUMENTS"
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m216:32[22m[39m
+    [90m214|[39m     [35mconst[39m tool [33m=[39m [34mmakeTool[39m([[34mnodeRule[39m([32m'safe'[39m[33m,[39m [32m''[39m)][33m,[39m audit[33m.[39msink)[33m;[39m
+    [90m215|[39m     const result = await tool.execute(args, { workspaceRoot: workspace…
+    [90m216|[39m     [34mexpect[39m(result[33m.[39merror[33m?.[39mcode)[33m.[39m[34mtoBe[39m([32m'INVALID_ARGUMENTS'[39m)[33m;[39m
+    [90m   |[39m                                [31m^[39m
+    [90m217|[39m     [34mexpect[39m([34mreaddirSync[39m([34mworkspace[39m()))[33m.[39m[34mtoEqual[39m([])[33m;[39m
+    [90m218|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 精确 argv 白名单与无 shell 执行[2m > [22mSchema 和公共导出明确只接受结构化 executable/args
+[31m[1mAssertionError[22m: expected undefined to be [Function createSecureCommandTool] // Object.is equality[39m
+
+[32m- Expected:[39m
+[Function createSecureCommandTool]
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m235:47[22m[39m
+    [90m233|[39m       }[33m,[39m
+    [90m234|[39m     })[33m;[39m
+    [90m235|[39m     expect(publicApi.createSecureCommandTool).toBe(createSecureCommand…
+    [90m   |[39m                                               [31m^[39m
+    [90m236|[39m     [34mexpect[39m(publicApi[33m.[39mcreateJsonlAuditSink)[33m.[39m[34mtoBeTypeOf[39m([32m'function'[39m)[33m;[39m
+    [90m237|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[10/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22mwall timeout 终止真实进程并记录耗时、signal 与资源审计
+[31m[1mSyntaxError[22m: Unexpected token 'N', "NOT_IMPLEMENTED" is not valid JSON[39m
+[36m [2m❯[22m parse test/d044-secure-command.test.ts:[2m59:15[22m[39m
+    [90m 57|[39m
+    [90m 58|[39m [35mfunction[39m [34mparse[39m(result[33m:[39m { content[33m:[39m string })[33m:[39m [33mSecureCommandResult[39m {
+    [90m 59|[39m   [35mreturn[39m [33mJSON[39m[33m.[39m[34mparse[39m(result[33m.[39mcontent) [35mas[39m [33mSecureCommandResult[39m[33m;[39m
+    [90m   |[39m               [31m^[39m
+    [90m 60|[39m }
+    [90m 61|[39m
+[90m [2m❯[22m test/d044-secure-command.test.ts:[2m250:21[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[11/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22mstdout/stderr 共用字节预算，多字节输出超限会终止而非无限截断
+[31m[1mSyntaxError[22m: Unexpected token 'N', "NOT_IMPLEMENTED" is not valid JSON[39m
+[36m [2m❯[22m parse test/d044-secure-command.test.ts:[2m59:15[22m[39m
+    [90m 57|[39m
+    [90m 58|[39m [35mfunction[39m [34mparse[39m(result[33m:[39m { content[33m:[39m string })[33m:[39m [33mSecureCommandResult[39m {
+    [90m 59|[39m   [35mreturn[39m [33mJSON[39m[33m.[39m[34mparse[39m(result[33m.[39mcontent) [35mas[39m [33mSecureCommandResult[39m[33m;[39m
+    [90m   |[39m               [31m^[39m
+    [90m 60|[39m }
+    [90m 61|[39m
+[90m [2m❯[22m test/d044-secure-command.test.ts:[2m270:21[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[12/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22mmaxConcurrent=1 且 maxQueue=0 时第二调用在启动前拒绝
+[31m[1mError[22m: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m282:3[22m[39m
+    [90m280|[39m   })[33m;[39m
+    [90m281|[39m
+    [90m282|[39m   [34mit[39m([32m'maxConcurrent=1 且 maxQueue=0 时第二调用在启动前拒绝'[39m[33m,[39m [35masync[39m () [33m=>[39m {
+    [90m   |[39m   [31m^[39m
+    [90m283|[39m     [35mconst[39m root [33m=[39m [34mworkspace[39m()[33m;[39m
+    [90m284|[39m     [35mconst[39m audit [33m=[39m [34mrecorder[39m()[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[13/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m排队调用可取消并被移除，后续有界等待者仍能获得许可
+[31m[1mError[22m: 未等到安全子进程 ready 握手[39m
+[36m [2m❯[22m waitForReady test/d044-secure-command.test.ts:[2m70:9[22m[39m
+    [90m 68|[39m     [35mawait[39m [34mdelay[39m([34m10[39m)[33m;[39m
+    [90m 69|[39m   }
+    [90m 70|[39m   [35mthrow[39m [35mnew[39m [33mError[39m([32m'未等到安全子进程 ready 握手'[39m)[33m;[39m
+    [90m   |[39m         [31m^[39m
+    [90m 71|[39m }
+    [90m 72|[39m
+[90m [2m❯[22m test/d044-secure-command.test.ts:[2m327:5[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[14/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m排队超过 maxQueueWaitMs 返回资源错误而不是无界等待
+[31m[1mError[22m: Test timed out in 5000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m342:3[22m[39m
+    [90m340|[39m   }[33m,[39m [34m10_000[39m)[33m;[39m
+    [90m341|[39m
+    [90m342|[39m   [34mit[39m([32m'排队超过 maxQueueWaitMs 返回资源错误而不是无界等待'[39m[33m,[39m [35masync[39m () [33m=>[39m {
+    [90m   |[39m   [31m^[39m
+    [90m343|[39m     [35mconst[39m root [33m=[39m [34mworkspace[39m()[33m;[39m
+    [90m344|[39m     const source = "require('node:fs').writeFileSync('ready','1');setI…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[15/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m预先取消的允许调用不会创建沙箱或进程，但有取消完成审计
+[31m[1mAssertionError[22m: expected undefined to be 'COMMAND_CANCELLED' // Object.is equality[39m
+
+[32m- Expected:[39m
+"COMMAND_CANCELLED"
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m380:32[22m[39m
+    [90m378|[39m     )[33m;[39m
+    [90m379|[39m
+    [90m380|[39m     [34mexpect[39m(result[33m.[39merror[33m?.[39mcode)[33m.[39m[34mtoBe[39m([32m'COMMAND_CANCELLED'[39m)[33m;[39m
+    [90m   |[39m                                [31m^[39m
+    [90m381|[39m     [34mexpect[39m([34mexistsSync[39m(marker))[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m382|[39m     [34mexpect[39m([34mreaddirSync[39m(root))[33m.[39m[34mtoEqual[39m([])[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[16/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m非法资源配置在工厂边界抛错：{"defaultTimeoutMs":0}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m非法资源配置在工厂边界抛错：{"defaultTimeoutMs":20,"maxTimeoutMs":10}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m非法资源配置在工厂边界抛错：{"maxTimeoutMs":1.5}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m非法资源配置在工厂边界抛错：{"maxOutputBytes":0}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m非法资源配置在工厂边界抛错：{"maxConcurrent":0}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m非法资源配置在工厂边界抛错：{"maxQueue":-1}
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m非法资源配置在工厂边界抛错：{"maxQueueWaitMs":0}
+[31m[1mAssertionError[22m: expected function to throw an error, but it didn't[39m
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m396:75[22m[39m
+    [90m394|[39m   ])([32m'非法资源配置在工厂边界抛错：%j'[39m[33m,[39m (resources) [33m=>[39m {
+    [90m395|[39m     [35mconst[39m audit [33m=[39m [34mrecorder[39m()[33m;[39m
+    [90m396|[39m     expect(() => makeTool([nodeRule('safe', '')], audit.sink, resource…
+    [90m   |[39m                                                                           [31m^[39m
+    [90m397|[39m   })[33m;[39m
+    [90m398|[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[17/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 资源预算与排队取消[2m > [22m空白名单默认全拒绝；相对规则路径、重复 id 和 NUL 配置不可构造
+[31m[1mAssertionError[22m: expected undefined to be 'COMMAND_NOT_ALLOWED' // Object.is equality[39m
+
+[32m- Expected:[39m
+"COMMAND_NOT_ALLOWED"
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m406:32[22m[39m
+    [90m404|[39m       { workspaceRoot[33m:[39m [34mworkspace[39m() }[33m,[39m
+    [90m405|[39m     )[33m;[39m
+    [90m406|[39m     [34mexpect[39m(denied[33m.[39merror[33m?.[39mcode)[33m.[39m[34mtoBe[39m([32m'COMMAND_NOT_ALLOWED'[39m)[33m;[39m
+    [90m   |[39m                                [31m^[39m
+    [90m407|[39m     expect(() => makeTool([{ id: 'relative', executable: 'node', args:…
+    [90m408|[39m       [33m.[39m[34mtoThrow[39m([33mTypeError[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[18/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 审计 fail-closed 语义[2m > [22mdecision 审计写失败时不启动允许命令
+[31m[1mAssertionError[22m: expected undefined to be 'AUDIT_WRITE_FAILED' // Object.is equality[39m
+
+[32m- Expected:[39m
+"AUDIT_WRITE_FAILED"
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m432:32[22m[39m
+    [90m430|[39m     )[33m;[39m
+    [90m431|[39m
+    [90m432|[39m     [34mexpect[39m(result[33m.[39merror[33m?.[39mcode)[33m.[39m[34mtoBe[39m([32m'AUDIT_WRITE_FAILED'[39m)[33m;[39m
+    [90m   |[39m                                [31m^[39m
+    [90m433|[39m     [34mexpect[39m([34mexistsSync[39m(marker))[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m434|[39m     [34mexpect[39m([33mJSON[39m[33m.[39m[34mstringify[39m(result))[33m.[39mnot[33m.[39m[34mtoContain[39m([33mFAKE_SECRET[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[19/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 审计 fail-closed 语义[2m > [22m拒绝决策的审计写失败也显式报 AUDIT_WRITE_FAILED，且绝不执行
+[31m[1mAssertionError[22m: expected undefined to be 'AUDIT_WRITE_FAILED' // Object.is equality[39m
+
+[32m- Expected:[39m
+"AUDIT_WRITE_FAILED"
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m447:32[22m[39m
+    [90m445|[39m     )[33m;[39m
+    [90m446|[39m
+    [90m447|[39m     [34mexpect[39m(result[33m.[39merror[33m?.[39mcode)[33m.[39m[34mtoBe[39m([32m'AUDIT_WRITE_FAILED'[39m)[33m;[39m
+    [90m   |[39m                                [31m^[39m
+    [90m448|[39m     [34mexpect[39m([34mexistsSync[39m(marker))[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m449|[39m   })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[20/38]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d044-secure-command.test.ts[2m > [22mD044 审计 fail-closed 语义[2m > [22mcompletion 审计失败显式报错但不谎称已执行操作可回滚
+[31m[1mAssertionError[22m: expected undefined to be 'AUDIT_WRITE_FAILED' // Object.is equality[39m
+
+[32m- Expected:[39m
+"AUDIT_WRITE_FAILED"
+
+[31m+ Received:[39m
+undefined
+
+[36m [2m❯[22m test/d044-secure-command.test.ts:[2m467:32[22m[39m
+    [90m465|[39m     )[33m;[39m
+    [90m466|[39m
+    [90m467|[39m     [34mexpect[39m(result[33m.[39merror[33m?.[39mcode)[33m.[39m[34mtoBe[39m([32m'AUDIT_WRITE_FAILED'[39m)[33m;[39m
+    [90m   |[39m                                [31m^[39m
+    [90m468|[39m     [34mexpect[39m([34mexistsSync[39m(marker))[33m.[39m[34mtoBe[39m([35mtrue[39m)[33m;[39m
+    [90m469|[39m     [34mexpect[39m([34mreadFileSync[39m(marker[33m,[39m [32m'utf8'[39m))[33m.[39m[34mtoBe[39m([32m'ran'[39m)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[21/38]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m3 failed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[31m38 failed[39m[22m[90m (38)[39m
+[2m   Start at [22m 08:40:53
+[2m   Duration [22m 15.21s[2m (tests 99%)[22m
