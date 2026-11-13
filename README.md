@@ -44,7 +44,10 @@ ToolRegistry.execute()
   allowlist → tenant → JSON → Schema → 敏感确认
                     │
                     ▼ 仅首次有效执行
-              lazy factory + cache
+              lazy factory
+                    │
+                    ▼ 缓存前运行时门禁
+       name / description / parameters 契约一致
                     │
                     ▼
          resilience → Tool.execute(args, context)
@@ -178,7 +181,7 @@ registry.list('天气');  // 普通 Registry 忽略可选查询，仍是全量
 
 ## 5. lazy 生命周期与缓存
 
-`registerLazy(schema, factory, options?)` 接收静态 Schema 和 `() => Tool | Promise<Tool>`。静态 Schema 是目录展示和参数校验的依据，factory 返回工具的名称必须与注册名称一致。
+`registerLazy(schema, factory, options?)` 接收静态 Schema 和 `() => Tool | Promise<Tool>`。静态 Schema 是目录展示、参数校验和运行时实现契约的依据。factory 返回 Tool 的 `name`、`description`、`parameters` 必须与注册静态 Schema 一致；这由 Registry 在缓存和业务 `execute()` 之前强制检查，不依赖调用方自觉。
 
 | 阶段 | factory 是否运行 |
 |---|---|
@@ -188,6 +191,7 @@ registry.list('天气');  // 普通 Registry 忽略可选查询，仍是全量
 | JSON 或参数 Schema 校验失败 | 否 |
 | 敏感工具确认拒绝 | 否 |
 | 通过上述检查的首次有效执行 | 是 |
+| factory 返回后的 Schema 契约校验失败 | 是，但业务 `execute()` 不运行，且不缓存 |
 | 后续执行 | 否，使用成功缓存 |
 | 多个并发首次执行 | 只运行一次，共享同一个加载 Promise |
 
@@ -199,6 +203,13 @@ factory 抛错或 reject 时：
 - 成功后才缓存 Tool，同一注册项不重复 factory；
 - `replace()` / `unregister()` 仍通过替换或删除整个注册项管理生命周期。
 
+factory 成功返回但静态 Schema 漂移时，同样走上述 `ToolResult` 边界，并在业务副作用前拒绝：
+
+- `name`、`description`、`parameters` 任一不一致都不会进入 `Tool.execute()`，漂移实例不会写入成功缓存；
+- `description` / `parameters` 漂移返回字段明确的 `INTERNAL_ERROR`、`retryable: true` 和“修正 factory 返回值后重试”的 hint，不回显漂移值或异常堆栈；
+- `parameters` 使用 Node 内置 `isDeepStrictEqual()` 做深严格比较，对象 key 顺序不同不会误报；无需新增依赖；
+- 修正 factory 后，后续有效执行会重新加载并再次校验。
+
 ## 6. 动态可见性不是授权
 
 `DynamicToolRegistry` 只覆盖 `list()` 的模型可见子集；所有执行仍进入同一个 `ToolRegistry.execute()`：
@@ -208,9 +219,10 @@ factory 抛错或 reject 时：
 3. JSON 解析；
 4. 注册 Schema 参数校验；
 5. 敏感工具显式确认；
-6. lazy 加载；
-7. 既有 resilience 与业务执行；
-8. 统一错误规范化。
+6. lazy factory 加载；
+7. `name` / `description` / `parameters` 运行时契约校验与成功缓存；
+8. 既有 resilience 与业务执行；
+9. 统一错误规范化。
 
 因此以下两件事可以同时成立：
 
@@ -249,20 +261,25 @@ Demo 文件：
 
 ## 8. 测试与 TDD 证据
 
-新增 4 个测试文件，共 17 项：
+新增 4 个测试文件，现共 21 项（首轮 17 项，契约复审追加 4 项）：
 
 | 文件 | 覆盖 |
 |---|---|
 | `test/d048-tool-retrieval.test.ts` | 英文/中文、排序、同分、重复词、空查询、无匹配、limit、策略目录、旧 `list()` 兼容 |
-| `test/d048-lazy-tools.test.ts` | 选中不实例化、同步/异步加载、并发去重、缓存、factory 失败恢复、名称漂移、安全顺序、确认、resilience、搜索不可见仍可执行 |
+| `test/d048-lazy-tools.test.ts` | 选中不实例化、同步/异步加载、并发去重、缓存、factory 失败恢复、name/description/parameters 漂移、乱序 parameters 等价、安全顺序、确认、resilience、搜索不可见仍可执行 |
 | `test/d048-loop.test.ts` | 每轮子集变化、最新用户查询、空查询、跨轮旧工具执行、完整结果回喂 |
 | `test/d048-demo.test.ts` | 真实 AgentLoop、8 个 lazy 工具、Schema 子集、factory 计数、工具执行和最终回答 |
 
-严格先写测试并运行：
+首轮严格先写测试并运行：
 
 - RED：`evidence/d048-tdd-red.txt`，真实结果为 **16 failed / 1 passed / 17 total**；唯一通过项是旧 `ToolRegistry.list()` 尚未改变的兼容行为；
 - GREEN：`evidence/d048-tdd-green.txt`，同一批测试 **17 passed**；
 - 开发中旧 D036/D042 取消测试还捕获了 eager 工具新增微任务的时序回归；实现改为 eager/已缓存工具不等待 lazy Promise，相关测试恢复通过，未修改旧测试期望。
+
+契约复审再次按 RED → GREEN 执行，且不篡改首轮证据：
+
+- RED：`evidence/d048-schema-drift-red.txt`，真实结果为 **3 failed / 8 passed / 11 total**；description、parameters 和异步 factory 漂移测试均复现业务 `execute()` 被错误运行，合法乱序 parameters 回归项通过；
+- GREEN：`evidence/d048-schema-drift-green.txt`，同一文件 **11 passed**，覆盖漂移拒绝、明确修复提示、不泄漏漂移值、合法乱序匹配和异步 factory。
 
 最终完整验收：
 
@@ -275,8 +292,8 @@ git diff --check
 
 实测结果：
 
-- `npm run check`：lint、typecheck、**60 个测试文件 / 528 项测试**全部通过；
-- 覆盖率：语句 **91.37%**、分支 **86.24%**、函数 **96.94%**、行 **93.59%**；
+- `npm run check`：lint、typecheck、**60 个测试文件 / 532 项测试**全部通过；
+- 覆盖率：语句 **91.39%**、分支 **86.26%**、函数 **96.94%**、行 **93.6%**；
 - `npm run demo:d048`：`D048 Demo PASS`；
 - `git diff --check`：无空白错误；
 - 未新增运行时依赖。
@@ -288,8 +305,9 @@ git diff --check
 3. **隐藏不是权限。** 必须继续配置 Registry 的 allowlist、tenant、敏感确认和业务授权。
 4. **字符不是 token。** 2049 → 497 是本 Demo 的 JSON Schema 字符代理指标，不是精确 token、成本或延迟结论。
 5. **缓存是注册项级、进程内的。** 不是跨进程或持久缓存；替换/注销对应注册项后，新注册项有自己的加载状态。
-6. **注册 Schema 必须准确描述实现。** 参数校验以注册 Schema 为准，factory 返回名称必须一致；调用方应让实现描述和参数保持一致。
-7. **factory 是加载阶段，不是业务 resilience 工作。** 业务超时、重试和取消仍由 `Tool.execute()` 与既有 resilience 处理；factory 自身应避免执行不受控的长业务任务。
+6. **静态 Schema 是运行时契约。** 参数校验以注册 Schema 为准；factory 返回的 name/description/parameters 由 Registry 强制比对，漂移在缓存和业务执行前拒绝，并提供可修复错误。它不改变授权边界，也不能替代正确的业务 Schema 设计。
+7. **parameters 比较不是完整 JSON Schema 语义归一化。** 深严格比较允许对象 key 顺序差异，但数组顺序等其他结构差异仍会判为漂移；factory 应返回与注册 Schema 同构的参数对象。
+8. **factory 是加载阶段，不是业务 resilience 工作。** 业务超时、重试和取消仍由 `Tool.execute()` 与既有 resilience 处理；factory 自身应避免执行不受控的长业务任务。
 
 ## 10. 本日文件
 
@@ -301,7 +319,9 @@ src/runtime/loop.ts               每轮查询与真实 provider 工具子集
 src/demo/d048.ts                  离线真实 Loop Demo
 scripts/d048-dynamic-tools.ts     Demo 入口
 test/d048-*.test.ts               单元与集成测试
-evidence/d048-tdd-red.txt         真实 RED
-evidence/d048-tdd-green.txt       真实 GREEN
+evidence/d048-tdd-red.txt         首轮真实 RED
+evidence/d048-tdd-green.txt       首轮真实 GREEN
+evidence/d048-schema-drift-red.txt   契约复审真实 RED
+evidence/d048-schema-drift-green.txt 契约复审真实 GREEN
 evidence/d048-transcript.txt      真实 Demo transcript
 ```

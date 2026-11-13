@@ -1,5 +1,7 @@
+import { isDeepStrictEqual } from 'node:util';
+
 import type { ToolCall } from '../core/message.ts';
-import type { Tool, ToolContext, ToolResult, ToolSchema } from '../core/tool.ts';
+import { ToolError, type Tool, type ToolContext, type ToolResult, type ToolSchema } from '../core/tool.ts';
 import { errorResult, normalizeError, toolError } from './errors.ts';
 import { ResilientToolExecutor, type ToolResilienceOptions } from './resilience.ts';
 import { validateArguments, validateToolSchema } from './schema.ts';
@@ -329,6 +331,22 @@ export class ToolRegistry {
         }
         if (tool.name !== entry.schema.name) {
           throw new TypeError('非法懒加载工具：工具名称必须与注册 Schema 一致');
+        }
+        if (tool.description !== entry.schema.description) {
+          throw new ToolError(
+            'INTERNAL_ERROR',
+            '懒加载工具 description 与注册 Schema 不一致',
+            true,
+            '请修正 factory 返回的 description，使其与注册 Schema 一致后重试',
+          );
+        }
+        if (!isDeepStrictEqual(tool.parameters, entry.schema.parameters)) {
+          throw new ToolError(
+            'INTERNAL_ERROR',
+            '懒加载工具 parameters 与注册 Schema 不一致',
+            true,
+            '请修正 factory 返回的 parameters，使其与注册 Schema 一致后重试',
+          );
         }
         entry.tool = tool;
         return tool;

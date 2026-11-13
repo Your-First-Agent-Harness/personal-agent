@@ -107,6 +107,105 @@ describe('D048 lazy tool 生命周期', () => {
   });
 });
 
+describe('D048 lazy tool Schema 契约门禁', () => {
+  it('description 漂移时 factory 已加载但业务 execute 不运行，返回可修复且不泄值的错误', async () => {
+    const secret = 'secret-description-drift';
+    const execute = vi.fn(() => Promise.resolve({ content: 'must-not-run' }));
+    const factory = vi.fn(() => ({ ...weatherTool(execute), description: secret }));
+    const registry = new ToolRegistry();
+    registry.registerLazy(weatherSchema, factory);
+
+    const result = await registry.execute(call('weather_current'), { workspaceRoot: '.' });
+
+    expect(result).toMatchObject({
+      isError: true,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: '懒加载工具 description 与注册 Schema 不一致',
+        retryable: true,
+        hint: '请修正 factory 返回的 description，使其与注册 Schema 一致后重试',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('parameters 漂移时 factory 已加载但业务 execute 不运行，返回可修复且不泄值的错误', async () => {
+    const secret = 'secret-parameters-drift';
+    const execute = vi.fn(() => Promise.resolve({ content: 'must-not-run' }));
+    const factory = vi.fn(() => ({
+      ...weatherTool(execute),
+      parameters: {
+        ...weatherSchema.parameters,
+        properties: { city: { type: 'string', description: secret } },
+      },
+    }));
+    const registry = new ToolRegistry();
+    registry.registerLazy(weatherSchema, factory);
+
+    const result = await registry.execute(call('weather_current'), { workspaceRoot: '.' });
+
+    expect(result).toMatchObject({
+      isError: true,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: '懒加载工具 parameters 与注册 Schema 不一致',
+        retryable: true,
+        hint: '请修正 factory 返回的 parameters，使其与注册 Schema 一致后重试',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('parameters 仅对象 key 顺序不同但语义相同时正常执行并缓存', async () => {
+    const execute = vi.fn((args: unknown) => Promise.resolve({ content: JSON.stringify(args) }));
+    const parameters: ToolSchema['parameters'] = {
+      additionalProperties: false,
+      required: ['city'],
+      properties: { city: { type: 'string' } },
+      type: 'object',
+    };
+    const factory = vi.fn(() => ({ ...weatherTool(execute), parameters }));
+    const registry = new ToolRegistry();
+    registry.registerLazy(weatherSchema, factory);
+
+    const first = await registry.execute(call('weather_current'), { workspaceRoot: '.' });
+    const second = await registry.execute(call('weather_current'), { workspaceRoot: '.' });
+
+    expect(first.isError).toBeUndefined();
+    expect(second.isError).toBeUndefined();
+    expect(first.content).toBe('{"city":"上海"}');
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
+  it('异步 factory 返回漂移 description 时同样受运行时门禁控制', async () => {
+    const execute = vi.fn(() => Promise.resolve({ content: 'must-not-run' }));
+    const factory = vi.fn(async () => {
+      await Promise.resolve();
+      return { ...weatherTool(execute), description: 'async-description-drift' };
+    });
+    const registry = new ToolRegistry();
+    registry.registerLazy(weatherSchema, factory);
+
+    const result = await registry.execute(call('weather_current'), { workspaceRoot: '.' });
+
+    expect(result).toMatchObject({
+      isError: true,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: '懒加载工具 description 与注册 Schema 不一致',
+        retryable: true,
+      },
+    });
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(execute).not.toHaveBeenCalled();
+  });
+});
+
 describe('D048 lazy tool 不绕过 Registry 安全顺序', () => {
   it('白名单或租户拒绝、JSON/Schema 错误、确认拒绝都不运行 factory', async () => {
     const confirm = vi.fn(() => false);
