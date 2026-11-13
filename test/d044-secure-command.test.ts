@@ -134,9 +134,12 @@ describe('D044 精确 argv 白名单与无 shell 执行', () => {
     expect(result.error?.code).toBe('COMMAND_NOT_ALLOWED');
     expect(existsSync(marker)).toBe(false);
     expect(readdirSync(root)).toEqual([]);
-    expect(audit.records).toHaveLength(1);
+    expect(audit.records).toHaveLength(2);
     expect(audit.records[0]).toMatchObject({
       phase: 'decision', decision: 'denied', status: 'denied', resultCode: 'COMMAND_NOT_ALLOWED',
+    });
+    expect(audit.records[1]).toMatchObject({
+      phase: 'completion', decision: 'denied', status: 'denied', resultCode: 'COMMAND_NOT_ALLOWED',
     });
     expect(JSON.stringify(result)).not.toContain(FAKE_SECRET);
     expect(JSON.stringify(audit.records)).not.toContain(FAKE_SECRET);

@@ -1,0 +1,164 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.1.0 [39m[90m/Users/stark/Desktop/新兴科创产业园 OPC/Agent-Harness/personal-agent[39m
+
+ [31m❯[39m test/d046-demo.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m test/d046-attack-chains.test.ts [2m([22m[2m5 tests[22m[2m | [22m[31m2 failed[39m[2m)[22m[32m 212[2mms[22m[39m
+   [31m❯[39m D046 工具沙箱攻防链 [2m(5)[22m
+     [32m✓[39m D043 的绝对路径、shell cd 与受控删除都能穿过初始 cwd[32m 51[2mms[22m[39m
+[31m     [31m×[31m D044 在 spawn 前拒绝五类绕过且每次拒绝都有 decision/completion[39m[32m 37[2mms[22m[39m
+     [32m✓[39m D043/D044 子进程都看不到伪造宿主秘密且日志不包含原值[32m 60[2mms[22m[39m
+     [32m✓[39m D044 输出 flood 与短循环分别被共享字节预算和 wall timeout 终止[32m 60[2mms[22m[39m
+[31m     [31m×[31m JSONL sink 保留 D046 拒绝链的真实审计行[39m[32m 2[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m test/d046-demo.test.ts[2m [ test/d046-demo.test.ts ][22m
+[31m[1mError[22m: Cannot find module '../src/demo/d046.ts' imported from /Users/stark/Desktop/新兴科创产业园 OPC/Agent-Harness/personal-agent/test/d046-demo.test.ts[39m
+[36m [2m❯[22m test/d046-demo.test.ts:[2m3:1[22m[39m
+    [90m  1|[39m [35mimport[39m { describe[33m,[39m expect[33m,[39m it } [35mfrom[39m [32m'vitest'[39m[33m;[39m
+    [90m  2|[39m import type { CommandAuditRecord } from '../src/observability/audit-si…
+    [90m  3|[39m [35mimport[39m { runD046Demo } [35mfrom[39m [32m'../src/demo/d046.ts'[39m[33m;[39m
+    [90m   |[39m [31m^[39m
+    [90m  4|[39m
+    [90m  5|[39m [34mdescribe[39m([32m'runD046Demo'[39m[33m,[39m () [33m=>[39m {
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯[22m[39m
+
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 2 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m test/d046-attack-chains.test.ts[2m > [22mD046 工具沙箱攻防链[2m > [22mD044 在 spawn 前拒绝五类绕过且每次拒绝都有 decision/completion
+[31m[1mAssertionError[22m: expected { afterControl: +0, …(5) } to deeply equal { afterControl: 1, …(5) }[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  {[22m
+[32m-   "afterControl": 1,[39m
+[31m+   "afterControl": 0,[39m
+[2m    "deniedSpawnDelta": 0,[22m
+[2m    "markerCreated": false,[22m
+[2m    "observations": [[22m
+[2m      {[22m
+[2m        "code": "COMMAND_NOT_ALLOWED",[22m
+[2m        "decisions": [[22m
+[32m-         "denied",[39m
+[2m          "denied",[22m
+[2m        ],[22m
+[2m        "id": "executable",[22m
+[2m        "phases": [[22m
+[2m          "decision",[22m
+[32m-         "completion",[39m
+[2m        ],[22m
+[2m        "statuses": [[22m
+[2m          "denied",[22m
+[32m-         "denied",[39m
+[2m        ],[22m
+[2m      },[22m
+[2m      {[22m
+[2m        "code": "COMMAND_NOT_ALLOWED",[22m
+[2m        "decisions": [[22m
+[2m          "denied",[22m
+[32m-         "denied",[39m
+[2m        ],[22m
+[2m        "id": "argv",[22m
+[2m        "phases": [[22m
+[2m          "decision",[22m
+[32m-         "completion",[39m
+[2m        ],[22m
+[2m        "statuses": [[22m
+[32m-         "denied",[39m
+[2m          "denied",[22m
+[2m        ],[22m
+[2m      },[22m
+[2m      {[22m
+[2m        "code": "COMMAND_NOT_ALLOWED",[22m
+[2m        "decisions": [[22m
+[32m-         "denied",[39m
+[2m          "denied",[22m
+[2m        ],[22m
+[2m        "id": "shell",[22m
+[2m        "phases": [[22m
+[2m          "decision",[22m
+[32m-         "completion",[39m
+[2m        ],[22m
+[2m        "statuses": [[22m
+[2m          "denied",[22m
+[32m-         "denied",[39m
+[2m        ],[22m
+[2m      },[22m
+[2m      {[22m
+[2m        "code": "COMMAND_NOT_ALLOWED",[22m
+[2m        "decisions": [[22m
+[32m-         "denied",[39m
+[2m          "denied",[22m
+[2m        ],[22m
+[2m        "id": "substitution",[22m
+[2m        "phases": [[22m
+[2m          "decision",[22m
+[32m-         "completion",[39m
+[2m        ],[22m
+[2m        "statuses": [[22m
+[32m-         "denied",[39m
+[2m          "denied",[22m
+[2m        ],[22m
+[2m      },[22m
+[2m      {[22m
+[2m        "code": "COMMAND_NOT_ALLOWED",[22m
+[2m        "decisions": [[22m
+[2m          "denied",[22m
+[32m-         "denied",[39m
+[2m        ],[22m
+[2m        "id": "redirection",[22m
+[2m        "phases": [[22m
+[2m          "decision",[22m
+[32m-         "completion",[39m
+[2m        ],[22m
+[2m        "statuses": [[22m
+[32m-         "denied",[39m
+[2m          "denied",[22m
+[2m        ],[22m
+[2m      },[22m
+[2m    ],[22m
+[32m-   "recordCount": 12,[39m
+[31m+   "recordCount": 7,[39m
+[2m    "victim": "SECURE_ORIGINAL",[22m
+[2m  }[22m
+
+[36m [2m❯[22m test/d046-attack-chains.test.ts:[2m148:8[22m[39m
+    [90m146|[39m       markerCreated[33m:[39m [34mexistsSync[39m(marker)[33m,[39m
+    [90m147|[39m       victim[33m:[39m [34mreadFileSync[39m(victim[33m,[39m [32m'utf8'[39m)[33m,[39m
+    [90m148|[39m     })[33m.[39m[34mtoEqual[39m({
+    [90m   |[39m        [31m^[39m
+    [90m149|[39m       afterControl[33m:[39m [34m1[39m[33m,[39m
+    [90m150|[39m       deniedSpawnDelta[33m:[39m [34m0[39m[33m,[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m test/d046-attack-chains.test.ts[2m > [22mD046 工具沙箱攻防链[2m > [22mJSONL sink 保留 D046 拒绝链的真实审计行
+[31m[1mAssertionError[22m: expected [ 'decision' ] to deeply equal [ 'decision', 'completion' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  [[22m
+[2m    "decision",[22m
+[32m-   "completion",[39m
+[2m  ][22m
+
+[36m [2m❯[22m test/d046-attack-chains.test.ts:[2m233:69[22m[39m
+    [90m231|[39m     [34mexpect[39m(denied[33m.[39merror[33m?.[39mcode)[33m.[39m[34mtoBe[39m([32m'COMMAND_NOT_ALLOWED'[39m)[33m;[39m
+    [90m232|[39m     const lines = readFileSync(join(workspace.root, 'audit.jsonl'), 'u…
+    [90m233|[39m     expect(lines.map((record: CommandAuditRecord) => record.phase)).to…
+    [90m   |[39m                                                                     [31m^[39m
+    [90m234|[39m   })[33m;[39m
+    [90m235|[39m })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m2 failed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m2 failed[39m[22m[2m | [22m[1m[32m3 passed[39m[22m[90m (5)[39m
+[2m   Start at [22m 10:05:41
+[2m   Duration [22m 321ms[2m (tests 84%, transform 10%, import 4%, worker 2%)[22m

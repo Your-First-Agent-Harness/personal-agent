@@ -48,6 +48,7 @@
     "demo:d042": "node scripts/d042-weather.ts",
     "demo:d043": "node scripts/d043-sandbox.ts",
     "demo:d044": "node scripts/d044-security.ts",
+    "demo:d046": "node scripts/d046-security.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",

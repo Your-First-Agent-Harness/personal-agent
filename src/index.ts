@@ -60,3 +60,5 @@ export type {
 } from './observability/audit-sink.ts';
 export { runD044Demo } from './demo/d044.ts';
 export type { D044DemoReport } from './demo/d044.ts';
+export { runD046Demo } from './demo/d046.ts';
+export type { D046DemoItem, D046DemoReport } from './demo/d046.ts';

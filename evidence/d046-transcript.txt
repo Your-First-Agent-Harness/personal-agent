@@ -1,0 +1,21 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 demo:d046
+> node scripts/d046-security.ts
+
+D046 安全演示：仅一次性 mkdtemp 实验根、伪造秘密、零外网；未录屏，使用真实终端 transcript。
+item=D043_ABSOLUTE_PATH expected="绝对路径读取并修改初始 cwd 外、实验根内的 victim" observed="before=ABSOLUTE_ORIGINAL;after=ABSOLUTE_ORIGINAL|ABSOLUTE_CHANGED;cwdOutside=true" control="D043 使用自己的一次性 cwd；victim 位于该 cwd 外但仍在 hostRoot 内" attackResult="cwd-crossed;hostRoot-contained" gate=ok
+item=D043_SHELL_CD expected="开放 shell 通过 cd 修改初始 cwd 外的受控 victim" observed="stdout=CD_ORIGINAL|CD_CHANGED;victim=CD_ORIGINAL|CD_CHANGED" control="目标目录仍在同一 hostRoot；没有访问真实用户目录" attackResult="cwd-crossed;hostRoot-contained" gate=ok
+item=D043_CONTROLLED_RM expected="只允许删除专门为攻击创建且位于 hostRoot 内的 delete victim" observed="victimExists=false;victimsDirectoryExists=true" control="rm 目标是预先创建的单一文件；未使用通配符，未指向实验根外" attackResult="controlled-victim-removed" gate=ok
+item=D044_EXECUTABLE expected="未允许 executable 在 spawn 前拒绝，marker/victim 不变且有双阶段审计" observed="code=COMMAND_NOT_ALLOWED;spawnDelta=0;audit=decision+completion;markerAbsent=true;victimUnchanged=true" control="正向控制 spawnCount=1；拒绝前后使用同一 marker/victim 对照" attackResult="blocked-before-spawn" gate=ok
+item=D044_ARGV expected="未允许 argv 在 spawn 前拒绝，marker/victim 不变且有双阶段审计" observed="code=COMMAND_NOT_ALLOWED;spawnDelta=0;audit=decision+completion;markerAbsent=true;victimUnchanged=true" control="正向控制 spawnCount=1；拒绝前后使用同一 marker/victim 对照" attackResult="blocked-before-spawn" gate=ok
+item=D044_SHELL_META expected="shell 元字符后缀 在 spawn 前拒绝，marker/victim 不变且有双阶段审计" observed="code=COMMAND_NOT_ALLOWED;spawnDelta=0;audit=decision+completion;markerAbsent=true;victimUnchanged=true" control="正向控制 spawnCount=1；拒绝前后使用同一 marker/victim 对照" attackResult="blocked-before-spawn" gate=ok
+item=D044_COMMAND_SUBSTITUTION expected="命令替换后缀 在 spawn 前拒绝，marker/victim 不变且有双阶段审计" observed="code=COMMAND_NOT_ALLOWED;spawnDelta=0;audit=decision+completion;markerAbsent=true;victimUnchanged=true" control="正向控制 spawnCount=1；拒绝前后使用同一 marker/victim 对照" attackResult="blocked-before-spawn" gate=ok
+item=D044_REDIRECTION expected="重定向后缀 在 spawn 前拒绝，marker/victim 不变且有双阶段审计" observed="code=COMMAND_NOT_ALLOWED;spawnDelta=0;audit=decision+completion;markerAbsent=true;victimUnchanged=true" control="正向控制 spawnCount=1；拒绝前后使用同一 marker/victim 对照" attackResult="blocked-before-spawn" gate=ok
+item=D043_ENV_CONTROL expected="伪造宿主 SECRET 不进入 D043 子进程 env，结果不含原秘密" observed="parentSecretPresent=true;childSecretPresent=false;resultLeak=false" control="父进程显式设置伪造秘密；子进程只报告布尔值，不打印秘密原值" attackResult="not-disclosed" gate=ok
+item=D044_ENV_CONTROL expected="允许的正向控制真实启动一次，伪造宿主 SECRET 不进入 env 或审计" observed="childSecretPresent=false;spawnCount=1;audit=decision+completion;resultLeak=false" control="同一 Node executable 与精确 env argv 已单独加入白名单" attackResult="allowed-control;not-disclosed" gate=ok
+item=D044_OUTPUT_BUDGET expected="256 字节输出在 stdout+stderr 共享 64 字节预算处被 SIGKILL" observed="code=COMMAND_OUTPUT_LIMIT;stdoutBytes=64;stderrBytes=0;outputLimitExceeded=true;cleanedUp=true;audit=decision+completion" control="仅向 pipe 写入 256 个 x；无文件、网络或危险负载" attackResult="terminated-by-output-budget" gate=ok
+item=D044_WALL_TIMEOUT expected="无害短循环在 30ms wall timeout 被 SIGKILL" observed="code=COMMAND_TIMEOUT;timedOut=true;cleanedUp=true;audit=decision+completion" control="负载只有 setInterval；严格短上限，不监听端口、不消耗文件或网络" attackResult="terminated-by-wall-timeout" gate=ok
+summary auditRecords=16 operations=8 secureSpawnCount=3 secureDeniedSpawnDelta=0 hostRootRemoved=true recording=none
+D046 Demo PASS: 12 项门禁成立；攻击未离开实验根；明确未录屏。
+auditEvidence=evidence/d046-audit.jsonl
