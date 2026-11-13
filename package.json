@@ -46,6 +46,7 @@
     "demo:d039": "node scripts/d039-reconnect.ts",
     "demo:d041": "node scripts/d041-knowledge.ts",
     "demo:d042": "node scripts/d042-weather.ts",
+    "demo:d043": "node scripts/d043-sandbox.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
