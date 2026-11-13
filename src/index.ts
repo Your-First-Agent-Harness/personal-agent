@@ -40,3 +40,7 @@ export type {
   D042DemoOptions,
   D042DemoReport,
 } from './demo/d042.ts';
+export { sandboxedCommandTool } from './tools/sandboxed-command.ts';
+export type { SandboxedCommandResult } from './tools/sandboxed-command.ts';
+export { runD043Demo } from './demo/d043.ts';
+export type { D043DemoReport } from './demo/d043.ts';

@@ -1,0 +1,13 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 demo:d043
+> node scripts/d043-sandbox.ts
+
+D043 Demo：一次性 cwd、最小 env、独立进程组与结构化 ToolResult。
+边界=进程/临时工作目录/env 最小隔离；不是容器、seccomp、权限降级或网络隔离。
+hostSecret=null allowedEnv=explicit-public-value
+isolatedCwd=true writable=true cleanedUp=true
+controlledDanger=removed-inside-sandbox cleanedUp=true
+cwdEscape=PATH_OUTSIDE_WORKSPACE markerCreated=false
+hostRootRemoved=true
+D043 Demo PASS：伪造宿主秘密未泄漏，临时目录可写且已清理，cwd 越权在启动前被拒绝。
