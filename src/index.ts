@@ -44,3 +44,19 @@ export { sandboxedCommandTool } from './tools/sandboxed-command.ts';
 export type { SandboxedCommandResult } from './tools/sandboxed-command.ts';
 export { runD043Demo } from './demo/d043.ts';
 export type { D043DemoReport } from './demo/d043.ts';
+export { createSecureCommandTool } from './tools/secure-command.ts';
+export type {
+  CommandAllowRule,
+  SecureCommandResources,
+  SecureCommandResult,
+  SecureCommandToolOptions,
+} from './tools/secure-command.ts';
+export { createJsonlAuditSink } from './observability/audit-sink.ts';
+export type {
+  AuditResourceUsage,
+  AuditSink,
+  CommandAuditRecord,
+  JsonlAuditSinkOptions,
+} from './observability/audit-sink.ts';
+export { runD044Demo } from './demo/d044.ts';
+export type { D044DemoReport } from './demo/d044.ts';

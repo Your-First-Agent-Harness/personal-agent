@@ -1,0 +1,15 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 demo:d044
+> node scripts/d044-security.ts
+
+D044 安全边界：realpath(executable) + 完整 argv 精确白名单；spawn shell:false
+allowed=OK stdout=allowed-ok
+denied=COMMAND_NOT_ALLOWED markerCreated=false
+shellBypass=COMMAND_NOT_ALLOWED markerCreated=false
+output=COMMAND_OUTPUT_LIMIT capturedBytes=64 budget=64
+timeout=COMMAND_TIMEOUT budgetMs=40
+auditFailure=AUDIT_WRITE_FAILED markerCreated=false
+auditRecords=8 redacted=true digest=sha256
+D044 Demo PASS
+auditEvidence=evidence/d044-audit.jsonl

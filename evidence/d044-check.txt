@@ -1,0 +1,116 @@
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 check
+> npm run lint && npm run typecheck && npm run test
+
+npm warn Unknown env config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 lint
+> eslint .
+
+npm warn Unknown env config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 typecheck
+> tsc --noEmit
+
+npm warn Unknown env config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+npm warn Unknown user config "home". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.
+
+> personal-agent@0.1.0 test
+> vitest run
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.1.0 [39m[90m/Users/stark/Desktop/新兴科创产业园 OPC/Agent-Harness/personal-agent[39m
+
+ [32m✓[39m test/tool-errors.test.ts [2m([22m[2m21 tests[22m[2m)[22m[33m 461[2mms[22m[39m
+ [32m✓[39m test/run-command.test.ts [2m([22m[2m22 tests[22m[2m)[22m[33m 637[2mms[22m[39m
+ [32m✓[39m test/d039-reconnect-demo.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 752[2mms[22m[39m
+   [32m✓[39m D039 跨进程 MCP 故障与新 Client 恢复 Demo [2m(4)[22m
+     [33m[2m✓[22m[39m 可运行入口使用默认 Client factory，并只在完整清理后报告 PASS[33m 459[2mms[22m[39m
+ [32m✓[39m test/d018-real-repair.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 784[2mms[22m[39m
+   [32m✓[39m D018 真实仓库回归修复回放 [2m(1)[22m
+     [33m[2m✓[22m[39m 缺陷副本先红，真实工具精确修复后变绿，并保留完整 Loop 证据[33m 783[2mms[22m[39m
+ [32m✓[39m test/d044-secure-command.test.ts [2m([22m[2m35 tests[22m[2m)[22m[33m 873[2mms[22m[39m
+ [32m✓[39m test/d025-offline-demo.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 897[2mms[22m[39m
+   [32m✓[39m D025 G1 确定性离线 Demo [2m(3)[22m
+     [33m[2m✓[22m[39m 无 API Key 时通过真实 read/edit/run_command 修复样例并证明测试先红后绿[33m 556[2mms[22m[39m
+     [33m[2m✓[22m[39m 返回可复核证据并输出离线声明、四个步骤和最终断言[33m 314[2mms[22m[39m
+ [32m✓[39m test/d044-demo.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 287[2mms[22m[39m
+ [32m✓[39m test/d032-multi-tool-demo.test.ts [2m([22m[2m4 tests[22m[2m)[22m[33m 409[2mms[22m[39m
+ [32m✓[39m test/d015-integration.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 400[2mms[22m[39m
+   [32m✓[39m D015 工作区修复闭环 [2m(1)[22m
+     [33m[2m✓[22m[39m 失败测试回喂后精确编辑并复测成功，事件与 Session 保留完整历史[33m 400[2mms[22m[39m
+ [32m✓[39m test/d022-crash-recovery.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 313[2mms[22m[39m
+   [32m✓[39m 真实进程崩溃恢复 [2m(1)[22m
+     [33m[2m✓[22m[39m SIGKILL 阻塞在 Provider 的真实 Loop 后，第二个 Node 进程恢复同一 run 与 Session[33m 312[2mms[22m[39m
+ [32m✓[39m test/d042-weather.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m test/d043-demo.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 174[2mms[22m[39m
+ [32m✓[39m test/d036-stdio-integration.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 136[2mms[22m[39m
+ [32m✓[39m test/d017-failure-paths.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 147[2mms[22m[39m
+ [32m✓[39m test/d037-stdio-integration.test.ts [2m([22m[2m3 tests[22m[2m)[22m[33m 1483[2mms[22m[39m
+   [32m✓[39m D037 离线 stdio filesystem 集成 [2m(3)[22m
+     [33m[2m✓[22m[39m 远端调用超时变成 TOOL_TIMEOUT，不悬挂 AgentLoop[33m 1219[2mms[22m[39m
+ [32m✓[39m test/d037-demo.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 178[2mms[22m[39m
+ [32m✓[39m test/d020-cli.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 249[2mms[22m[39m
+ [32m✓[39m test/d020-streaming.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 27[2mms[22m[39m
+ [32m✓[39m test/d023-idempotency.test.ts [2m([22m[2m12 tests[22m[2m)[22m[32m 127[2mms[22m[39m
+ [32m✓[39m test/d044-audit-sink.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 35[2mms[22m[39m
+ [32m✓[39m test/d021-session-store.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 42[2mms[22m[39m
+ [32m✓[39m test/d036-mcp-server.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 144[2mms[22m[39m
+ [32m✓[39m test/d022-persistent-runner.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+ [32m✓[39m test/d041-knowledge.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m test/d030-resilience.test.ts [2m([22m[2m40 tests[22m[2m)[22m[32m 46[2mms[22m[39m
+ [32m✓[39m test/config.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+ [32m✓[39m test/events.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m test/d022-run-store.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 38[2mms[22m[39m
+ [32m✓[39m test/openai-compatible.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 75[2mms[22m[39m
+ [32m✓[39m test/cancellation.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 17[2mms[22m[39m
+ [32m✓[39m test/write-file.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 21[2mms[22m[39m
+ [32m✓[39m test/edit-file.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 30[2mms[22m[39m
+ [32m✓[39m test/tools.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m test/d042-demo.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 45[2mms[22m[39m
+ [32m✓[39m test/d037-filesystem-backend.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m test/d028-schema-validation.test.ts [2m([22m[2m35 tests[22m[2m)[22m[32m 20[2mms[22m[39m
+ [32m✓[39m test/loop.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m test/context.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m test/d027-tool-registry.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 10[2mms[22m[39m
+ [32m✓[39m test/d029-permissions.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m test/logger.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m test/repl.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m test/errors.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m test/d041-demo.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 11[2mms[22m[39m
+ [32m✓[39m test/d037-mcp-tool.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 9[2mms[22m[39m
+ [32m✓[39m test/d016-invalid-arguments.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m test/d020-loop-streaming.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m test/d026-feedback-archive.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 3[2mms[22m[39m
+ [32m✓[39m test/d026-feedback-command.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m test/session.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+ [32m✓[39m test/d035-mcp-client.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 2643[2mms[22m[39m
+ [32m✓[39m test/d043-sandboxed-command.test.ts [2m([22m[2m29 tests[22m[2m)[22m[33m 3776[2mms[22m[39m
+   [32m✓[39m D043 sandboxed_command [2m(29)[22m
+     [33m[2m✓[22m[39m 超时终止 shell、子进程和同组孙进程，不遗留进程[33m 3017[2mms[22m[39m
+ [32m✓[39m test/d023-crash-idempotency.test.ts [2m([22m[2m10 tests[22m[2m)[22m[33m 4890[2mms[22m[39m
+   [32m✓[39m D024 真实 SIGKILL 幂等恢复 [2m(10)[22m
+     [33m[2m✓[22m[39m 第 1 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 627[2mms[22m[39m
+     [33m[2m✓[22m[39m 第 2 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 591[2mms[22m[39m
+     [33m[2m✓[22m[39m 第 3 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 496[2mms[22m[39m
+     [33m[2m✓[22m[39m 第 4 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 540[2mms[22m[39m
+     [33m[2m✓[22m[39m 第 5 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 484[2mms[22m[39m
+     [33m[2m✓[22m[39m 第 6 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 445[2mms[22m[39m
+     [33m[2m✓[22m[39m 第 7 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 430[2mms[22m[39m
+     [33m[2m✓[22m[39m 第 8 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 472[2mms[22m[39m
+     [33m[2m✓[22m[39m 第 9 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 391[2mms[22m[39m
+     [33m[2m✓[22m[39m 第 10 次杀进程后，重复恢复与重复请求保持同一快照且不重放工具[33m 412[2mms[22m[39m
+ [32m✓[39m test/d025-package.test.ts [2m([22m[2m1 test[22m[2m)[22m[33m 5323[2mms[22m[39m
+   [32m✓[39m D025 tarball 干净安装验收 [2m(1)[22m
+     [33m[2m✓[22m[39m 构建并安装 tarball 后，从安装目录执行 bin 的完整 G1 Demo[33m 5322[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m54 passed[39m[22m[90m (54)[39m
+[2m      Tests [22m [1m[32m505 passed[39m[22m[90m (505)[39m
+[2m   Start at [22m 09:00:40
+[2m   Duration [22m 5.50s[2m (tests 88%, transform 7%, import 5%, worker 1%)[22m
+
+[2m    Isolate [22m [33m54 workers spawned[39m[2m · ~114ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~446ms faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
