@@ -18,12 +18,21 @@ import { createTerminalTurn, runRepl, writeTurnOutput } from './repl.ts';
 import { runTaskCli } from './task-cli.ts';
 import { runConfigCli } from './config-cli.ts';
 import { runToolsCli } from './tools-cli.ts';
+import { ApprovalStore, runApprovalCli } from './approval-cli.ts';
 import type { TurnOutput } from './repl.ts';
 
 const args = process.argv.slice(2);
 const prompt = args.join(' ').trim();
+const approvals = new ApprovalStore();
 
-if (args[0] === 'tools') {
+if (args[0] === 'approval') {
+  try {
+    process.stdout.write(`${runApprovalCli(args.slice(1), approvals)}\n`);
+  } catch (error) {
+    process.stderr.write(`审批命令失败：${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+} else if (args[0] === 'tools') {
   try {
     process.stdout.write(`${runToolsCli(args.slice(1))}\n`);
   } catch (error) {
