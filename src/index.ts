@@ -97,5 +97,7 @@ export { acceptsLongTermMemory, classifyMemory } from './memory/layers.ts';
 export type { MemoryEntry, MemoryLayer } from './memory/layers.ts';
 export { MemoryWriter } from './memory/writer.ts';
 export type { MemoryCandidate, MemoryWriteResult } from './memory/writer.ts';
+export { searchMemory } from './memory/retriever.ts';
+export type { MemoryMatch } from './memory/retriever.ts';
 export { runD050G2Demo } from './demo/d050.ts';
 export type { D050G2Report } from './demo/d050.ts';
