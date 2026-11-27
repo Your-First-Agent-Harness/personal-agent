@@ -55,6 +55,7 @@
     "demo:d051": "node scripts/d051-context-budget.ts",
     "demo:d052": "node scripts/d052-context-priority.ts",
     "demo:d053": "node scripts/d053-truncation.ts",
+    "demo:d054": "node scripts/d054-compaction.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
