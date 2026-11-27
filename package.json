@@ -75,6 +75,7 @@
     "demo:d072": "node scripts/d072-background-runner.ts",
     "demo:d073": "node scripts/d073-task-control.ts",
     "demo:d074": "node scripts/d074-sub-agent.ts",
+    "demo:d075": "node scripts/d075-parallel-agents.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
