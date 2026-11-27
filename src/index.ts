@@ -35,6 +35,8 @@ export { summarizeBenchmark } from './runtime/benchmark.ts';
 export type { BenchmarkResult, BenchmarkSummary } from './runtime/benchmark.ts';
 export { TaskQueue } from './runtime/task-queue.ts';
 export type { QueueTask, QueueTaskStatus } from './runtime/task-queue.ts';
+export { createBackgroundRunner } from './runtime/background-runner.ts';
+export type { BackgroundRunner } from './runtime/background-runner.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
