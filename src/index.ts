@@ -70,6 +70,8 @@ export { TenantStore } from './runtime/tenant-store.ts';
 export type { TenantItem, TenantRecord } from './runtime/tenant-store.ts';
 export { migrateRecord } from './runtime/migration.ts';
 export type { Migration, VersionedRecord } from './runtime/migration.ts';
+export { PersonalAgentClient } from './sdk.ts';
+export type { TaskHandle, TaskSubmission } from './sdk.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {

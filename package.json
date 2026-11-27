@@ -92,6 +92,7 @@
     "demo:d089": "node scripts/d089-approval-cli.ts",
     "demo:d090": "node scripts/d090-tenant-store.ts",
     "demo:d091": "node scripts/d091-migration.ts",
+    "demo:d092": "node scripts/d092-sdk.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
