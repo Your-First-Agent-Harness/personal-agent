@@ -1,12 +1,12 @@
-# D059 · 长任务故障恢复
+# D060 · 上下文工程阶段总结
 
-D059 明确长任务中的恢复决策：可恢复错误有限重试，中断任务从检查点恢复，不重复盲目执行副作用；不可恢复错误或达到尝试上限时停止并保留原因。
+D060 汇总 D051–D059 的上下文工程基础，并建立可重复的阶段基线。当前 PA 已具备统一预算、优先级裁剪、结果截断、压缩接口、任务摘要、Schema 分组、压力测试、长任务状态和恢复决策。
 
 ## 产出
 
-- `src/runtime/recovery.ts`：恢复决策函数。
-- `test/d059-recovery.test.ts`：retry、resume、stop 三类路径测试。
-- `scripts/d059-recovery.ts`：可复现验收脚本。
+- `docs/context-engineering.md`：上下文工程能力与边界说明。
+- `scripts/d060-context-baseline.ts`：阶段基线脚本。
+- `test/d060-context-baseline.test.ts`：基线回归测试。
 
 ## 复现
 
@@ -14,9 +14,16 @@ D059 明确长任务中的恢复决策：可恢复错误有限重试，中断任
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d059
+npm run build
+npm run demo:d060
 ```
 
-## 边界
+成功时必须看到：
 
-本日提供确定性决策组件，尚未把恢复动作接入持久化 Run Store；真实副作用重放仍需后续幂等和检查点机制保护。
+```text
+D060 CONTEXT BASELINE PASS
+```
+
+## 真实边界
+
+本阶段证明的是上下文工程组件可组合、可测试、可重复测量；还没有证明 100 轮真实模型任务成功率，也没有宣称成本已经下降 40%。这些指标留到 D068–D070 的基准和 G3 验收。
