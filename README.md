@@ -1,13 +1,13 @@
-# D098 · v1.0.0-rc.1 发布
+# D099 · v1.0.0 最终发布审计
 
-D098 将产品化版本升级到 `1.0.0-rc.1`，并执行 RC 版本、产品化结构和发布审计的综合验收。
+D099 增加最终发布审计，确认 RC 产品化清单、API 导出兼容性和版本元数据均满足 v1.0.0 发布候选要求。
 
 ## 产出
 
-- `src/demo/d098.ts`：RC 验收链路。
-- `test/d098-rc.test.ts`：RC 回归测试。
-- `scripts/d098-rc-acceptance.ts`：可复现 RC 脚本。
-- `docs/releases/v1.0.0-rc.1.md`：RC 发布说明。
+- `src/release/final-audit.ts`：最终审计聚合器。
+- `test/d099-final-audit.test.ts`：RC 审计回归测试。
+- `scripts/d099-final-audit.ts`：可复现审计脚本。
+- `docs/final-audit.md`：审计范围和边界。
 
 ## 复现
 
@@ -16,9 +16,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d098
+npm run demo:d099
 ```
 
 ## 边界
 
-RC 仍不宣称完成真实用户规模、分布式部署或线上模型质量目标；这些证据不能由本地确定性 Demo 替代。
+最终审计只覆盖仓库内已实现能力，不冒充真实外部服务、用户规模、分布式故障和长期运行证据。

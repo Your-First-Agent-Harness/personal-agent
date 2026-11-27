@@ -99,6 +99,7 @@
     "demo:d096": "node scripts/d096-product-acceptance.ts",
     "demo:d097": "node scripts/d097-release-audit.ts",
     "demo:d098": "node scripts/d098-rc-acceptance.ts",
+    "demo:d099": "node scripts/d099-final-audit.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
