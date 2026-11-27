@@ -33,6 +33,8 @@ export { decideCostAction } from './runtime/cost-budget.ts';
 export type { CostAction, CostDecision } from './runtime/cost-budget.ts';
 export { summarizeBenchmark } from './runtime/benchmark.ts';
 export type { BenchmarkResult, BenchmarkSummary } from './runtime/benchmark.ts';
+export { TaskQueue } from './runtime/task-queue.ts';
+export type { QueueTask, QueueTaskStatus } from './runtime/task-queue.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {

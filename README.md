@@ -1,24 +1,22 @@
-# D070 · G3 发布与 v0.3.0
+# D071 · 任务队列抽象
 
-D070 发布 G3 阶段版本，打包上下文工程、记忆、长任务状态、恢复、成本和 Benchmark 能力，并保留真实证据边界。
+D071 增加任务队列核心抽象，支持任务创建、领取、完成、失败和查询，并对重复任务、未知任务和非法状态转换显式失败。
 
 ## 产出
 
-- `docs/releases/v0.3.0.md`：G3 发布说明。
-- `CHANGELOG.md`：v0.3.0 变更记录。
-- `package.json` 与 `src/index.ts`：版本升级至 `0.3.0`。
-- `v0.3.0` Git tag：在 main 合并后创建。
+- `src/runtime/task-queue.ts`：内存任务队列和状态模型。
+- `test/d071-task-queue.test.ts`：正常流、幂等和失败路径测试。
+- `scripts/d071-task-queue.ts`：可复现验收脚本。
 
-## 验证
+## 复现
 
 ```bash
 npm run lint
 npm run typecheck
 npm test
-npm run build
-npm run demo:d069
+npm run demo:d071
 ```
 
 ## 边界
 
-v0.3.0 的 G3 证据是组件级和确定性基线；真实模型的 100 轮成功率、成本下降 40% 和外部用户数据仍未被伪造为已完成。
+当前队列是内存实现，尚未接入 SQLite 或后台 Worker；D071 只固定状态语义，持久化和后台执行留到后续分支。
