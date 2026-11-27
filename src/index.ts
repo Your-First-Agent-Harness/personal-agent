@@ -12,6 +12,8 @@ export type { D041DemoReport, D041DemoStep, D041Source } from './demo/d041.ts';
 export { runAgentLoop } from './runtime/loop.ts';
 export { measureContextBudget, messageBudget, toolSchemaChars } from './context/budget.ts';
 export type { ContextBudgetInput, ContextBudgetReport } from './context/budget.ts';
+export { buildPrioritizedContext } from './context/priority.ts';
+export type { ContextDecision, ContextPriority, PrioritizedContext } from './context/priority.ts';
 export type { AgentLoopOptions, AgentLoopResult } from './runtime/loop.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
