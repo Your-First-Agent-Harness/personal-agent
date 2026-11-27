@@ -29,6 +29,8 @@ export { createTaskPlan, updatePlanStep } from './runtime/task-plan.ts';
 export type { PlanStep, PlanStepStatus, TaskPlan } from './runtime/task-plan.ts';
 export { calculateCost } from './runtime/cost.ts';
 export type { CostEvent, CostReport } from './runtime/cost.ts';
+export { decideCostAction } from './runtime/cost-budget.ts';
+export type { CostAction, CostDecision } from './runtime/cost-budget.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {

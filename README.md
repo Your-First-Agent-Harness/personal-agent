@@ -1,12 +1,12 @@
-# D066 · 成本核算
+# D067 · 成本预算与降级策略
 
-D066 增加统一成本事件和报告，分别统计模型、工具、重试、上下文压缩和等待的单位消耗及耗时，为 G3 的成本预算和降级策略提供输入。
+D067 为任务成本增加 continue/degrade/stop 三段式决策：低于阈值继续，接近预算时降级模型或工具策略，达到上限时停止，避免成本无界增长。
 
 ## 产出
 
-- `src/runtime/cost.ts`：成本事件、汇总和按类型报告。
-- `test/d066-cost.test.ts`：汇总与非法成本测试。
-- `scripts/d066-cost.ts`：可复现验收脚本。
+- `src/runtime/cost-budget.ts`：成本预算决策。
+- `test/d067-cost-budget.test.ts`：三种决策和非法参数测试。
+- `scripts/d067-cost-budget.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D066 增加统一成本事件和报告，分别统计模型、工具、重试、
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d066
+npm run demo:d067
 ```
 
 ## 边界
 
-`units` 是统一计量占位符，不直接等同于供应商账单金额；当前只计算显式事件，不自动采集真实 Provider 价格。
+当前只返回决策，不自动切换模型或修改工具清单；预算单位仍是内部计量单位，不等同于实际货币成本。
