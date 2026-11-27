@@ -1,12 +1,16 @@
-# D091 · 数据版本迁移与兼容
+# D092 · 稳定 SDK 与编程式任务 API
 
-D091 增加通用版本化记录迁移器：从当前版本按连续步骤迁移到目标版本，缺少迁移步骤或尝试降级时明确失败。
+D092 增加面向调用方的 `PersonalAgentClient`：通过 SDK 提交任务，获得稳定的任务 handle，并查询任务状态；核心类型从包根入口导出。
 
-## 产出
+## 示例
 
-- `src/runtime/migration.ts`：版本记录、迁移函数和连续迁移器。
-- `test/d091-migration.test.ts`：正常迁移、降级和缺失迁移测试。
-- `scripts/d091-migration.ts`：可复现验收脚本。
+```ts
+import { PersonalAgentClient } from 'personal-agent';
+
+const client = new PersonalAgentClient<{ prompt: string }>();
+const task = client.submit({ payload: { prompt: 'hello' } });
+console.log(task.id, task.get());
+```
 
 ## 复现
 
@@ -15,9 +19,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d091
+npm run demo:d092
 ```
 
 ## 边界
 
-当前迁移器只处理内存对象，不自动扫描数据库、不提供回滚事务或跨版本备份；生产迁移仍需要持久化层配合。
+当前 SDK 绑定进程内 TaskQueue，不自动执行任务、不跨进程持久化，自动生成的 id 仅用于当前运行实例；稳定 HTTP API 留待后续部署阶段。
