@@ -17,7 +17,7 @@ export function inspectProductization(root: string): ProductizationReport {
   };
   const checks = {
     packageName: manifest.name === 'personal-agent',
-    version: typeof manifest.version === 'string' && manifest.version === '1.0.0-rc.1',
+    version: typeof manifest.version === 'string' && manifest.version === '1.0.0',
     binDeclared: manifest.bin?.['personal-agent'] === './dist/cli/main.js',
     rootImportDeclared: manifest.exports?.['.'] !== undefined,
     distEntryBuilt: existsSync(join(root, 'dist', 'index.js')),
