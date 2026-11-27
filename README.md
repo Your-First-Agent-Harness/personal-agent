@@ -1,12 +1,13 @@
-# D094 · API 兼容性检查
+# D095 · 产品化发布清单
 
-D094 增加 API manifest 比较器：新增根导出视为兼容，移除已有导出明确标记为不兼容，为 v1 API 冻结和弃用策略提供可执行检查基础。
+D095 固化发布前产品化结构检查：包元数据、根入口、CLI bin、构建产物和部署文档必须同时存在，为后续 RC 验收减少遗漏。
 
 ## 产出
 
-- `src/api/compatibility.ts`：API manifest 比较。
-- `test/d094-compatibility.test.ts`：新增和移除导出测试。
-- `scripts/d094-compatibility.ts`：可复现验收脚本。
+- `src/release/productization.ts`：产品化清单检查器。
+- `test/d095-productization.test.ts`：当前仓库清单回归测试。
+- `scripts/d095-productization.ts`：可复现验收脚本。
+- `docs/productization.md`：清单和真实能力边界。
 
 ## 复现
 
@@ -15,9 +16,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d094
+npm run demo:d095
 ```
 
 ## 边界
 
-当前检查的是导出名称集合，不分析 TypeScript 类型签名、运行时行为或语义兼容性；正式 API 冻结还需要人工审阅和版本策略。
+清单只验证仓库结构和本地构建产物，不替代真实 npm 安装、跨平台运行、认证、持久化或线上演练。

@@ -95,6 +95,7 @@
     "demo:d092": "node scripts/d092-sdk.ts",
     "demo:d093": "node scripts/d093-health.ts",
     "demo:d094": "node scripts/d094-compatibility.ts",
+    "demo:d095": "node scripts/d095-productization.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
