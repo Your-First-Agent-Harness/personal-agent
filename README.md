@@ -1,12 +1,12 @@
-# D064 · 记忆冲突、版本与过期
+# D065 · 任务计划与检查点
 
-D064 增加长期记忆版本模型：保留版本号、active 状态和过期时间；同一 key 存在不同有效内容时报告冲突，不静默选择旧值或新值。
+D065 增加结构化任务计划：复杂任务可以拆成有 id 的步骤，每步记录 pending/running/completed/failed 状态和尝试次数，为后续恢复和成本统计提供检查点。
 
 ## 产出
 
-- `src/memory/conflicts.ts`：版本过滤和冲突检测。
-- `test/d064-memory-conflicts.test.ts`：冲突、过期、失活测试。
-- `scripts/d064-memory-conflicts.ts`：可复现验收脚本。
+- `src/runtime/task-plan.ts`：任务计划、步骤状态和更新函数。
+- `test/d065-task-plan.test.ts`：状态、尝试次数和非法步骤测试。
+- `scripts/d065-task-plan.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D064 增加长期记忆版本模型：保留版本号、active 状态和过期�
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d064
+npm run demo:d065
 ```
 
 ## 边界
 
-本日只检测和报告冲突，不替用户做不可逆的偏好选择；版本尚未持久化，后续需要接入存储和审批策略。
+当前计划是内存不可变数据结构，尚未持久化或自动调度步骤；步骤依赖关系和 DAG 调度留到后续阶段。
