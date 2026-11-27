@@ -1,14 +1,12 @@
-# D089 · 权限审批 CLI 与敏感工具确认
+# D090 · 多租户隔离与数据保留
 
-D089 增加一次性 tool call 审批记录和 CLI：按调用 id、工具名记录 `approved` 或 `denied` 决策，为现有 ToolRegistry 的敏感工具确认回调提供产品化入口。
+D090 增加进程内租户存储边界：每条数据绑定 `tenantId`，跨租户读取不可见；租户创建时声明正整数保留天数，并提供按时间清理接口。
 
-## 命令
+## 产出
 
-```bash
-node dist/cli/main.js approval approve call-1 write_file
-node dist/cli/main.js approval deny call-2 run_command
-node dist/cli/main.js approval list
-```
+- `src/runtime/tenant-store.ts`：租户、隔离数据和清理策略。
+- `test/d090-tenant-store.test.ts`：跨租户隔离、非法租户/保留期和清理测试。
+- `scripts/d090-tenant-store.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -17,9 +15,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d089
+npm run demo:d090
 ```
 
 ## 边界
 
-当前审批存储在进程内，CLI 每次启动是新进程；它不自动放行工具、不跨进程持久化，也不替代真实用户确认界面。D090 再处理多租户和数据保留边界。
+当前是进程内内存策略，不提供数据库级行权限、加密、跨进程租户认证或自动定时清理；保留天数是契约字段，调用方负责传入清理时间。
