@@ -53,6 +53,7 @@
     "demo:d049": "node --env-file-if-exists=.env scripts/d049-retrieval.ts",
     "demo:d050": "node --env-file-if-exists=.env scripts/d050-g2-acceptance.ts",
     "demo:d051": "node scripts/d051-context-budget.ts",
+    "demo:d052": "node scripts/d052-context-priority.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
