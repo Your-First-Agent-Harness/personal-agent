@@ -1,4 +1,5 @@
 import { buildContext } from '../context/build.ts';
+import { measureContextBudget, toolSchemaChars } from '../context/budget.ts';
 import type { Message } from '../core/message.ts';
 import type { AgentStopReason, EventSink } from '../core/event.ts';
 import { ModelCancelledError } from '../adapters/model/provider.ts';
@@ -78,7 +79,20 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
         scores: dynamicMatches.map(({ score }) => score),
       });
     }
-    const requestMessages = buildContext(messages, options.maxContextChars ?? 24_000);
+    const maxContextChars = options.maxContextChars ?? 24_000;
+    const toolChars = toolSchemaChars(tools);
+    if (toolChars >= maxContextChars) {
+      throw new Error(`工具 Schema 已占满上下文预算：${toolChars}/${maxContextChars}`);
+    }
+    const requestMessages = buildContext(messages, maxContextChars - toolChars);
+    const contextBudget = measureContextBudget({
+      messages: requestMessages,
+      tools,
+      maxChars: maxContextChars,
+    });
+    if (!contextBudget.fits) {
+      throw new Error(`上下文预算不足：${contextBudget.totalChars}/${contextBudget.maxChars}`);
+    }
     const request = {
       messages: requestMessages,
       maxTokens: options.maxTokens,

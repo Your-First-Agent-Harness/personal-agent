@@ -52,6 +52,7 @@
     "demo:d048": "node scripts/d048-dynamic-tools.ts",
     "demo:d049": "node --env-file-if-exists=.env scripts/d049-retrieval.ts",
     "demo:d050": "node --env-file-if-exists=.env scripts/d050-g2-acceptance.ts",
+    "demo:d051": "node scripts/d051-context-budget.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
