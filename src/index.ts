@@ -81,6 +81,7 @@ export type { ProductizationReport } from './release/productization.ts';
 export { createReleaseAudit } from './release/audit.ts';
 export type { AuditItem, ReleaseAudit } from './release/audit.ts';
 export { runD098RcAcceptance } from './demo/d098.ts';
+export { runFinalAudit } from './release/final-audit.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
