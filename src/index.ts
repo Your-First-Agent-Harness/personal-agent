@@ -21,6 +21,8 @@ export type { ContextCompactionResult, ContextCompactor } from './context/compac
 export { createTaskSummary, formatTaskSummary } from './context/task-summary.ts';
 export type { TaskStepStatus, TaskStepSummary, TaskSummary } from './context/task-summary.ts';
 export type { AgentLoopOptions, AgentLoopResult } from './runtime/loop.ts';
+export { TaskStateMachine } from './runtime/task-state.ts';
+export type { TaskRunStatus, TaskStateMachineOptions, TaskTurnState } from './runtime/task-state.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {

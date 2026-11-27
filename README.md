@@ -1,12 +1,12 @@
-# D057 · 上下文预算压力测试
+# D058 · 100 轮任务状态机
 
-D057 建立可重复的上下文压力用例，覆盖短历史、大工具目录和超长工具结果，确认统一预算模型能够报告适配与超预算，而不是静默放大上限。
+D058 增加长任务状态记录：每轮记录进度标识和状态，支持最大轮次保险丝与连续无进展检测，避免 Agent 在重复动作中无限循环。
 
 ## 产出
 
-- `src/context/pressure.ts`：压力用例执行器。
-- `test/d057-pressure.test.ts`：三类压力回归测试。
-- `scripts/d057-pressure.ts`：可复现验收脚本。
+- `src/runtime/task-state.ts`：任务状态机和轮次快照。
+- `test/d058-task-state.test.ts`：最大轮次、无进展和完成优先级测试。
+- `scripts/d058-task-state.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D057 建立可重复的上下文压力用例，覆盖短历史、大工具目录
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d057
+npm run demo:d058
 ```
 
 ## 边界
 
-当前压力测试测量字符预算，不是 tokenizer token 或真实延迟基准；超预算报告不会自动决定压缩策略。
+本日状态机是独立运行时组件，尚未改变既有 Agent Loop 的停止语义；`progressKey` 由编排层提供，不自动判断自然语言任务是否真的有进展。
