@@ -1,12 +1,12 @@
-# D076 · 子 Agent 权限与资源隔离
+# D077 · 任务依赖图与 DAG 调度
 
-D076 为子 Agent 增加最大派生深度、最大子任务数量和单子任务预算限制，所有越界行为在启动前拒绝，防止无限派生和资源失控。
+D077 增加任务依赖图校验和 ready 节点计算：依赖完成后才允许进入下一步，并对未知依赖和循环依赖明确拒绝。
 
 ## 产出
 
-- `src/runtime/sub-agent-policy.ts`：子 Agent 策略校验。
-- `test/d076-sub-agent-policy.test.ts`：允许和三类越界测试。
-- `scripts/d076-sub-agent-policy.ts`：可复现验收脚本。
+- `src/runtime/task-dag.ts`：DAG 校验和 ready 节点选择。
+- `test/d077-task-dag.test.ts`：正常、未知依赖和循环依赖测试。
+- `scripts/d077-task-dag.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D076 为子 Agent 增加最大派生深度、最大子任务数量和单子任�
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d076
+npm run demo:d077
 ```
 
 ## 边界
 
-本日只执行启动前策略校验，不实现运行中动态资源回收或跨进程隔离；这些能力需要后续任务调度和托管运行支持。
+当前只计算依赖就绪状态，不执行实际调度或持久化；并行度、失败传播和重试策略由后续托管运行层处理。

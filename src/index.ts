@@ -45,6 +45,8 @@ export { aggregateParallelResults, runParallelAgents } from './runtime/parallel-
 export type { ParallelAgentResult } from './runtime/parallel-agents.ts';
 export { validateSubAgentPolicy } from './runtime/sub-agent-policy.ts';
 export type { SubAgentPolicy } from './runtime/sub-agent-policy.ts';
+export { readyDagNodes, validateDag } from './runtime/task-dag.ts';
+export type { DagNode } from './runtime/task-dag.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
