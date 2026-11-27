@@ -51,6 +51,8 @@ export { RunStore } from './runtime/run-store.ts';
 export type { RunRecord } from './runtime/run-store.ts';
 export { IdempotencyStore } from './runtime/idempotency.ts';
 export type { IdempotencyRecord } from './runtime/idempotency.ts';
+export { TraceRecorder } from './observability/trace.ts';
+export type { TraceSpan } from './observability/trace.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
