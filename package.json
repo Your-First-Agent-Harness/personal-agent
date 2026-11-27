@@ -81,6 +81,7 @@
     "demo:d078": "node scripts/d078-run-store.ts",
     "demo:d079": "node scripts/d079-idempotency.ts",
     "demo:d080": "node scripts/d080-orchestration-baseline.ts",
+    "demo:d081": "node scripts/d081-trace.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
