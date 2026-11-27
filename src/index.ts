@@ -1,4 +1,4 @@
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 
 export type { ChatRequest, ChatResult, ModelProvider } from './adapters/model/provider.ts';
 export type { Tool, ToolContext, ToolSchema } from './core/tool.ts';
@@ -59,6 +59,7 @@ export { replayTrace } from './observability/replay.ts';
 export type { ReplayResult, ReplayStep } from './observability/replay.ts';
 export { evaluateReplay } from './observability/eval.ts';
 export type { EvalCase, EvalResult } from './observability/eval.ts';
+export { runD085G4Acceptance } from './demo/d085.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
