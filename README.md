@@ -1,12 +1,12 @@
-# D063 · 长期记忆检索与来源解释
+# D064 · 记忆冲突、版本与过期
 
-D063 增加长期记忆关键词检索，返回稳定排序、匹配分数、记忆 key 和来源，确保 PA 使用记忆时可以解释“这条信息从哪里来”。
+D064 增加长期记忆版本模型：保留版本号、active 状态和过期时间；同一 key 存在不同有效内容时报告冲突，不静默选择旧值或新值。
 
 ## 产出
 
-- `src/memory/retriever.ts`：确定性记忆检索器和来源元数据。
-- `test/d063-memory-retriever.test.ts`：匹配、无匹配和非法 limit 测试。
-- `scripts/d063-memory-retriever.ts`：可复现验收脚本。
+- `src/memory/conflicts.ts`：版本过滤和冲突检测。
+- `test/d064-memory-conflicts.test.ts`：冲突、过期、失活测试。
+- `scripts/d064-memory-conflicts.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D063 增加长期记忆关键词检索，返回稳定排序、匹配分数、记
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d063
+npm run demo:d064
 ```
 
 ## 边界
 
-当前为内存关键词检索，不是向量检索；没有自动把结果注入模型上下文，调用方必须显式选择和展示来源。
+本日只检测和报告冲突，不替用户做不可逆的偏好选择；版本尚未持久化，后续需要接入存储和审批策略。
