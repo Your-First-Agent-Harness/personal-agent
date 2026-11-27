@@ -85,5 +85,7 @@ export { runD048Demo } from './demo/d048.ts';
 export type { D048DemoReport, D048RequestReport } from './demo/d048.ts';
 export { runD049Demo } from './demo/d049.ts';
 export type { D049RetrievalReport } from './demo/d049.ts';
+export { expandToolSchemaGroup, groupToolSchemas } from './tools/schema-groups.ts';
+export type { ToolSchemaGroup } from './tools/schema-groups.ts';
 export { runD050G2Demo } from './demo/d050.ts';
 export type { D050G2Report } from './demo/d050.ts';
