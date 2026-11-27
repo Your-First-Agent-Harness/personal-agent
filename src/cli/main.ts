@@ -16,12 +16,20 @@ import { createBuiltinTools } from '../tools/builtin.ts';
 import { ToolRegistry } from '../tools/registry.ts';
 import { createTerminalTurn, runRepl, writeTurnOutput } from './repl.ts';
 import { runTaskCli } from './task-cli.ts';
+import { runConfigCli } from './config-cli.ts';
 import type { TurnOutput } from './repl.ts';
 
 const args = process.argv.slice(2);
 const prompt = args.join(' ').trim();
 
-if (args[0] === 'task') {
+if (args[0] === 'config') {
+  try {
+    process.stdout.write(`${runConfigCli(args.slice(1))}\n`);
+  } catch (error) {
+    process.stderr.write(`配置命令失败：${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+} else if (args[0] === 'task') {
   try {
     process.stdout.write(`${runTaskCli(args.slice(1))}\n`);
   } catch (error) {

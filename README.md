@@ -1,26 +1,26 @@
-# D086 · CLI 任务提交与状态查询
+# D087 · 配置文件与环境变量覆盖
 
-D086 为产品化阶段增加最小 CLI 任务入口：任务可以通过 `create` 写入本地任务存储，通过 `status` 查询，通过 `list` 查看全部排队任务。
+D087 增加 `config show` CLI：读取 `agent.config.json`，应用已有的 `PA_*` 环境变量覆盖，并在展示配置时脱敏模型 API key。
 
 ## 命令
 
 ```bash
-npm run build
-PA_TASK_STORE=/tmp/pa-tasks.json node dist/cli/main.js task create task-1 '{"kind":"demo"}'
-PA_TASK_STORE=/tmp/pa-tasks.json node dist/cli/main.js task status task-1
-PA_TASK_STORE=/tmp/pa-tasks.json node dist/cli/main.js task list
+node dist/cli/main.js config show
+node dist/cli/main.js config show --json
 ```
 
-也可以运行确定性 Demo：
+配置优先级：环境变量 > `agent.config.json` > 默认值。API key 只显示 `[REDACTED]`，不会写入 CLI 输出。
+
+## 复现
 
 ```bash
 npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d086
+npm run demo:d087
 ```
 
 ## 边界
 
-D086 的 CLI 只负责本地 JSON 任务提交和查询，不执行 Worker、不提供跨进程锁，也不宣称是生产持久化队列；任务执行由后续版本接入。
+D087 只提供配置读取、校验和安全展示，不修改配置文件、不管理密钥、不连接远程配置中心。
