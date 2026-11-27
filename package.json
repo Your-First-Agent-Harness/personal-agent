@@ -86,6 +86,7 @@
     "demo:d083": "node scripts/d083-replay.ts",
     "demo:d084": "node scripts/d084-eval.ts",
     "demo:d085": "node scripts/d085-g4-acceptance.ts",
+    "demo:d086": "node scripts/d086-task-cli.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",

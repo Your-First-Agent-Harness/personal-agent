@@ -1,30 +1,26 @@
-# D085 · G4 综合验收与 v0.4.0
+# D086 · CLI 任务提交与状态查询
 
-D085 将 D081–D084 的 Trace、Trace Store、Replay 和 Eval 串成 G4 全链路验收，并发布 `v0.4.0`。
+D086 为产品化阶段增加最小 CLI 任务入口：任务可以通过 `create` 写入本地任务存储，通过 `status` 查询，通过 `list` 查看全部排队任务。
 
-## 产出
+## 命令
 
-- `src/demo/d085.ts`：Trace → Store → Replay → Eval 验收链路。
-- `test/d085-g4-acceptance.test.ts`：G4 回归测试。
-- `scripts/d085-g4-acceptance.ts`：可复现验收脚本。
-- `docs/releases/v0.4.0.md`：发布说明和证据边界。
+```bash
+npm run build
+PA_TASK_STORE=/tmp/pa-tasks.json node dist/cli/main.js task create task-1 '{"kind":"demo"}'
+PA_TASK_STORE=/tmp/pa-tasks.json node dist/cli/main.js task status task-1
+PA_TASK_STORE=/tmp/pa-tasks.json node dist/cli/main.js task list
+```
 
-## 复现
+也可以运行确定性 Demo：
 
 ```bash
 npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d085
-```
-
-成功时必须看到：
-
-```text
-D085 G4 ACCEPTANCE PASS
+npm run demo:d086
 ```
 
 ## 边界
 
-v0.4.0 证明组件级 Trace/Replay/Eval 链路，不宣称真实模型质量、在线稳定性或生产级分布式观测能力。
+D086 的 CLI 只负责本地 JSON 任务提交和查询，不执行 Worker、不提供跨进程锁，也不宣称是生产持久化队列；任务执行由后续版本接入。

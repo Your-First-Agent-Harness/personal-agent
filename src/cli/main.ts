@@ -15,12 +15,20 @@ import { runAgentLoop } from '../runtime/loop.ts';
 import { createBuiltinTools } from '../tools/builtin.ts';
 import { ToolRegistry } from '../tools/registry.ts';
 import { createTerminalTurn, runRepl, writeTurnOutput } from './repl.ts';
+import { runTaskCli } from './task-cli.ts';
 import type { TurnOutput } from './repl.ts';
 
 const args = process.argv.slice(2);
 const prompt = args.join(' ').trim();
 
-if (args[0] === 'demo') {
+if (args[0] === 'task') {
+  try {
+    process.stdout.write(`${runTaskCli(args.slice(1))}\n`);
+  } catch (error) {
+    process.stderr.write(`任务命令失败：${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  }
+} else if (args[0] === 'demo') {
   const json = args[1] === '--json';
   try {
     const report = await runG1Demo((line) => {

@@ -60,6 +60,8 @@ export type { ReplayResult, ReplayStep } from './observability/replay.ts';
 export { evaluateReplay } from './observability/eval.ts';
 export type { EvalCase, EvalResult } from './observability/eval.ts';
 export { runD085G4Acceptance } from './demo/d085.ts';
+export { runTaskCli, taskStorePath } from './cli/task-cli.ts';
+export type { CliTask } from './cli/task-cli.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
