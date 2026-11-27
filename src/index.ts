@@ -23,6 +23,8 @@ export type { TaskStepStatus, TaskStepSummary, TaskSummary } from './context/tas
 export type { AgentLoopOptions, AgentLoopResult } from './runtime/loop.ts';
 export { TaskStateMachine } from './runtime/task-state.ts';
 export type { TaskRunStatus, TaskStateMachineOptions, TaskTurnState } from './runtime/task-state.ts';
+export { decideRecovery } from './runtime/recovery.ts';
+export type { RecoveryAction, RecoveryDecision } from './runtime/recovery.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
