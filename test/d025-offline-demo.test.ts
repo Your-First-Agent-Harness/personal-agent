@@ -72,7 +72,7 @@ describe('D025 G1 确定性离线 Demo', () => {
     const report = await runG1Demo((line) => lines.push(line));
     const transcript = lines.join('\n');
 
-    expect(publicApi.VERSION).toBe('1.0.0-rc.1');
+    expect(publicApi.VERSION).toBe('1.0.0');
     expect(publicApi.runG1Demo).toBe(runG1Demo);
     expect(publicApi.runAgentLoop).toBeTypeOf('function');
     expect(publicApi.createBuiltinTools).toBeTypeOf('function');

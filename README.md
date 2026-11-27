@@ -1,13 +1,13 @@
-# D099 · v1.0.0 最终发布审计
+# D100 · v1.0.0 正式发布
 
-D099 增加最终发布审计，确认 RC 产品化清单、API 导出兼容性和版本元数据均满足 v1.0.0 发布候选要求。
+D100 将版本从 RC 升级到 `1.0.0`，执行最终发布审计和 RC 回归，生成正式发布说明。
 
 ## 产出
 
-- `src/release/final-audit.ts`：最终审计聚合器。
-- `test/d099-final-audit.test.ts`：RC 审计回归测试。
-- `scripts/d099-final-audit.ts`：可复现审计脚本。
-- `docs/final-audit.md`：审计范围和边界。
+- `src/demo/d100.ts`：最终审计 → RC 回归验收链路。
+- `test/d100-release.test.ts`：v1.0.0 正式发布回归测试。
+- `scripts/d100-release-acceptance.ts`：可复现最终验收脚本。
+- `docs/releases/v1.0.0.md`：正式发布说明和能力边界。
 
 ## 复现
 
@@ -16,9 +16,15 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d099
+npm run demo:d100
+```
+
+成功时必须看到：
+
+```text
+D100 V1.0.0 RELEASE ACCEPTANCE PASS
 ```
 
 ## 边界
 
-最终审计只覆盖仓库内已实现能力，不冒充真实外部服务、用户规模、分布式故障和长期运行证据。
+v1.0.0 的证据来自确定性本地测试和脚本，不冒充真实用户规模、真实模型长任务成功率、真实成本下降、分布式故障恢复或线上 SLO 证据。

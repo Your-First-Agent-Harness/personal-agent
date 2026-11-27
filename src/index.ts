@@ -1,4 +1,4 @@
-export const VERSION = '1.0.0-rc.1';
+export const VERSION = '1.0.0';
 
 export type { ChatRequest, ChatResult, ModelProvider } from './adapters/model/provider.ts';
 export type { Tool, ToolContext, ToolSchema } from './core/tool.ts';
@@ -82,6 +82,7 @@ export { createReleaseAudit } from './release/audit.ts';
 export type { AuditItem, ReleaseAudit } from './release/audit.ts';
 export { runD098RcAcceptance } from './demo/d098.ts';
 export { runFinalAudit } from './release/final-audit.ts';
+export { runD100ReleaseAcceptance } from './demo/d100.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
