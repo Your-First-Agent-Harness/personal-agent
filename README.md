@@ -1,12 +1,13 @@
-# D088 · 工具注册与能力清单 CLI
+# D089 · 权限审批 CLI 与敏感工具确认
 
-D088 增加 `tools list` CLI，复用 `ToolRegistry.discover()` 展示当前内置工具的名称、版本、描述和完整 JSON Schema 元数据。
+D089 增加一次性 tool call 审批记录和 CLI：按调用 id、工具名记录 `approved` 或 `denied` 决策，为现有 ToolRegistry 的敏感工具确认回调提供产品化入口。
 
 ## 命令
 
 ```bash
-node dist/cli/main.js tools list
-node dist/cli/main.js tools list --json
+node dist/cli/main.js approval approve call-1 write_file
+node dist/cli/main.js approval deny call-2 run_command
+node dist/cli/main.js approval list
 ```
 
 ## 复现
@@ -16,9 +17,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d088
+npm run demo:d089
 ```
 
 ## 边界
 
-D088 只提供能力发现，不动态安装插件、不执行工具、不修改注册表；插件生命周期和权限审批留待后续产品化任务。
+当前审批存储在进程内，CLI 每次启动是新进程；它不自动放行工具、不跨进程持久化，也不替代真实用户确认界面。D090 再处理多租户和数据保留边界。

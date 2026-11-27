@@ -64,6 +64,8 @@ export { runTaskCli, taskStorePath } from './cli/task-cli.ts';
 export type { CliTask } from './cli/task-cli.ts';
 export { redactConfig, runConfigCli } from './cli/config-cli.ts';
 export { discoverTools, runToolsCli } from './cli/tools-cli.ts';
+export { ApprovalStore, runApprovalCli } from './cli/approval-cli.ts';
+export type { ApprovalDecision, ApprovalRecord } from './cli/approval-cli.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {

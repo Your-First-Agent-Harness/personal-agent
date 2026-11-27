@@ -89,6 +89,7 @@
     "demo:d086": "node scripts/d086-task-cli.ts",
     "demo:d087": "node scripts/d087-config-cli.ts",
     "demo:d088": "node scripts/d088-tools-cli.ts",
+    "demo:d089": "node scripts/d089-approval-cli.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
