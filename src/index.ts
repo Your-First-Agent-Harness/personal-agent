@@ -18,6 +18,8 @@ export { truncateAssistantText, truncateToolResult } from './context/truncate.ts
 export type { TruncationReport } from './context/truncate.ts';
 export { DeterministicContextCompactor } from './context/compactor.ts';
 export type { ContextCompactionResult, ContextCompactor } from './context/compactor.ts';
+export { createTaskSummary, formatTaskSummary } from './context/task-summary.ts';
+export type { TaskStepStatus, TaskStepSummary, TaskSummary } from './context/task-summary.ts';
 export type { AgentLoopOptions, AgentLoopResult } from './runtime/loop.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
