@@ -3,6 +3,7 @@ import type { Message } from '../core/message.ts';
 import type { AgentStopReason, EventSink } from '../core/event.ts';
 import { ModelCancelledError } from '../adapters/model/provider.ts';
 import type { ChatResult, ModelProvider, TokenUsage } from '../adapters/model/provider.ts';
+import { DynamicToolRegistry } from '../tools/dynamic-registry.ts';
 import type { ToolRegistry } from '../tools/registry.ts';
 
 export interface AgentLoopOptions {
@@ -65,6 +66,18 @@ export async function runAgentLoop(options: AgentLoopOptions): Promise<AgentLoop
     const latestUserQuery = messages.findLast((message) => message.role === 'user')?.content ?? '';
     const toolQuery = options.getToolQuery?.(messages, turn) ?? latestUserQuery;
     const tools = options.registry.list(toolQuery);
+    const dynamicMatches = options.registry instanceof DynamicToolRegistry
+      ? options.registry.search(toolQuery)
+      : undefined;
+    if (dynamicMatches !== undefined) {
+      options.eventSink?.emit({
+        type: 'tools_retrieved',
+        turn,
+        query: toolQuery,
+        toolNames: tools.map((tool) => tool.name),
+        scores: dynamicMatches.map(({ score }) => score),
+      });
+    }
     const requestMessages = buildContext(messages, options.maxContextChars ?? 24_000);
     const request = {
       messages: requestMessages,

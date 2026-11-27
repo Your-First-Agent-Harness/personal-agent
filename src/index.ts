@@ -22,7 +22,12 @@ export type {
 export { ToolRegistry } from './tools/registry.ts';
 export { DynamicToolRegistry } from './tools/dynamic-registry.ts';
 export type { DynamicToolRegistryOptions } from './tools/dynamic-registry.ts';
-export { DEFAULT_TOOL_SEARCH_LIMIT, searchToolSchemas } from './tools/retrieval.ts';
+export {
+  DEFAULT_TOOL_SEARCH_LIMIT,
+  searchToolMatches,
+  searchToolSchemas,
+} from './tools/retrieval.ts';
+export type { ToolSearchMatch, ToolSearchable } from './tools/retrieval.ts';
 export type {
   SensitiveToolConfirmation,
   ToolFactory,
@@ -68,3 +73,5 @@ export { runD046Demo } from './demo/d046.ts';
 export type { D046DemoItem, D046DemoReport } from './demo/d046.ts';
 export { runD048Demo } from './demo/d048.ts';
 export type { D048DemoReport, D048RequestReport } from './demo/d048.ts';
+export { runD049Demo } from './demo/d049.ts';
+export type { D049RetrievalReport } from './demo/d049.ts';
