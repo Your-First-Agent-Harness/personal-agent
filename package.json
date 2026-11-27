@@ -66,6 +66,7 @@
     "demo:d062": "node scripts/d062-memory-writer.ts",
     "demo:d063": "node scripts/d063-memory-retriever.ts",
     "demo:d064": "node scripts/d064-memory-conflicts.ts",
+    "demo:d065": "node scripts/d065-task-plan.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
