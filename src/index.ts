@@ -47,6 +47,8 @@ export { validateSubAgentPolicy } from './runtime/sub-agent-policy.ts';
 export type { SubAgentPolicy } from './runtime/sub-agent-policy.ts';
 export { readyDagNodes, validateDag } from './runtime/task-dag.ts';
 export type { DagNode } from './runtime/task-dag.ts';
+export { RunStore } from './runtime/run-store.ts';
+export type { RunRecord } from './runtime/run-store.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
