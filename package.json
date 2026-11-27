@@ -73,6 +73,7 @@
     "demo:d069": "node scripts/d069-g3-acceptance.ts",
     "demo:d071": "node scripts/d071-task-queue.ts",
     "demo:d072": "node scripts/d072-background-runner.ts",
+    "demo:d073": "node scripts/d073-task-control.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",

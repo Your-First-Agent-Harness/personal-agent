@@ -37,6 +37,8 @@ export { TaskQueue } from './runtime/task-queue.ts';
 export type { QueueTask, QueueTaskStatus } from './runtime/task-queue.ts';
 export { createBackgroundRunner } from './runtime/background-runner.ts';
 export type { BackgroundRunner } from './runtime/background-runner.ts';
+export { TaskController } from './runtime/task-control.ts';
+export type { ControlledTask, ControlledTaskStatus } from './runtime/task-control.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
