@@ -60,6 +60,7 @@
     "demo:d056": "node scripts/d056-schema-groups.ts",
     "demo:d057": "node scripts/d057-pressure.ts",
     "demo:d058": "node scripts/d058-task-state.ts",
+    "demo:d059": "node scripts/d059-recovery.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
