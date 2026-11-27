@@ -1,12 +1,13 @@
-# D084 · Eval 断言与回放对比
+# D085 · G4 综合验收与 v0.4.0
 
-D084 增加 Replay Eval：将期望输出与实际回放结果逐项比较，报告长度差异、步骤索引和缺失值，形成可用于 CI 的确定性通过/失败断言。
+D085 将 D081–D084 的 Trace、Trace Store、Replay 和 Eval 串成 G4 全链路验收，并发布 `v0.4.0`。
 
 ## 产出
 
-- `src/observability/eval.ts`：EvalCase、EvalResult 和回放比较函数。
-- `test/d084-eval.test.ts`：完全匹配与多项差异测试。
-- `scripts/d084-eval.ts`：可复现验收脚本。
+- `src/demo/d085.ts`：Trace → Store → Replay → Eval 验收链路。
+- `test/d085-g4-acceptance.test.ts`：G4 回归测试。
+- `scripts/d085-g4-acceptance.ts`：可复现验收脚本。
+- `docs/releases/v0.4.0.md`：发布说明和证据边界。
 
 ## 复现
 
@@ -15,9 +16,15 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d084
+npm run demo:d085
+```
+
+成功时必须看到：
+
+```text
+D085 G4 ACCEPTANCE PASS
 ```
 
 ## 边界
 
-当前 Eval 只比较字符串步骤结果，不包含语义相似度、真实模型质量或线上成功率；它是可重复的组件级回归门禁。
+v0.4.0 证明组件级 Trace/Replay/Eval 链路，不宣称真实模型质量、在线稳定性或生产级分布式观测能力。

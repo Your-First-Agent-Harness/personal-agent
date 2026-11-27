@@ -47,7 +47,7 @@ try {
     readonly version: string;
     readonly dependencies?: Readonly<Record<string, string>>;
   };
-  assert.equal(installedManifest.version, '0.3.0');
+  assert.equal(installedManifest.version, '0.4.0');
   assert.equal(installedManifest.dependencies, undefined);
   for (const excluded of ['src', 'test', 'scripts', 'coverage', '.env', '.env.example']) {
     assert.equal(existsSync(join(packageRoot, excluded)), false, `${excluded} 不应进入 tarball`);
@@ -59,7 +59,7 @@ try {
     [
       '--input-type=module',
       '--eval',
-      "import { createBuiltinTools, ToolRegistry, VERSION } from 'personal-agent'; const registry = new ToolRegistry(); for (const tool of createBuiltinTools()) registry.register(tool); if (registry.size !== 5 || VERSION !== '0.3.0') throw new Error('public export smoke failed'); process.stdout.write('PACKAGE_IMPORT_PASS tools=5 version=0.3.0\\n');",
+      "import { createBuiltinTools, ToolRegistry, VERSION } from 'personal-agent'; const registry = new ToolRegistry(); for (const tool of createBuiltinTools()) registry.register(tool); if (registry.size !== 5 || VERSION !== '0.4.0') throw new Error('public export smoke failed'); process.stdout.write('PACKAGE_IMPORT_PASS tools=5 version=0.4.0\\n');",
     ],
     {
       cwd: installRoot,
@@ -69,7 +69,7 @@ try {
     },
   );
   assert.equal(importCheck.status, 0, importCheck.stderr);
-  assert.equal(importCheck.stdout, 'PACKAGE_IMPORT_PASS tools=5 version=0.3.0\n');
+  assert.equal(importCheck.stdout, 'PACKAGE_IMPORT_PASS tools=5 version=0.4.0\n');
 
   const executable = join(installRoot, 'node_modules', '.bin', 'personal-agent');
   const demo = spawnSync(executable, ['demo', '--json'], {
