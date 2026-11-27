@@ -1,16 +1,13 @@
-# D092 · 稳定 SDK 与编程式任务 API
+# D093 · 部署文档与运行时健康检查
 
-D092 增加面向调用方的 `PersonalAgentClient`：通过 SDK 提交任务，获得稳定的任务 handle，并查询任务状态；核心类型从包根入口导出。
+D093 增加健康报告 API 和部署/诊断文档，统一说明本地构建、配置优先级、工具发现和当前内存组件的生产边界。
 
-## 示例
+## 产出
 
-```ts
-import { PersonalAgentClient } from 'personal-agent';
-
-const client = new PersonalAgentClient<{ prompt: string }>();
-const task = client.submit({ payload: { prompt: 'hello' } });
-console.log(task.id, task.get());
-```
+- `src/runtime/health.ts`：健康检查报告。
+- `test/d093-health.test.ts`：ok/degraded 状态测试。
+- `scripts/d093-health.ts`：可复现诊断脚本。
+- `docs/deployment.md`：部署和运行时诊断说明。
 
 ## 复现
 
@@ -19,9 +16,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d092
+npm run demo:d093
 ```
 
 ## 边界
 
-当前 SDK 绑定进程内 TaskQueue，不自动执行任务、不跨进程持久化，自动生成的 id 仅用于当前运行实例；稳定 HTTP API 留待后续部署阶段。
+健康报告是进程内基础检查，不等同于线上探针、外部依赖可用性或生产 SLO；部署文档明确列出持久化、认证、锁和观测仍需替换/接入的部分。
