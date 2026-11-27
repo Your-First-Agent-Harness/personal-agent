@@ -1,12 +1,12 @@
-# D052 · 消息优先级与确定性裁剪
+# D053 · 工具结果分层截断
 
-D052 在已有上下文预算上建立可解释的消息优先级：system 约束和最新用户目标优先，工具调用组保持配对，普通历史在预算不足时裁剪。每条输入消息都会生成保留/裁剪决策及原因。
+D053 为超长工具结果建立显式截断边界：工具结果保留开头以保留标题、字段和错误上下文；assistant 文本保留尾部以保留最新结论；两者都带有可识别的截断标记并严格受消息预算限制。
 
 ## 产出
 
-- `src/context/priority.ts`：优先级分类、裁剪决策和 `buildPrioritizedContext`。
-- `test/d052-priority.test.ts`：system/latest user 保留和工具组完整性测试。
-- `scripts/d052-context-priority.ts`：可复现验收脚本。
+- `src/context/truncate.ts`：工具结果和 assistant 文本截断器。
+- `test/d053-truncation.test.ts`：正常、角色错误和非法预算测试。
+- `scripts/d053-truncation.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D052 在已有上下文预算上建立可解释的消息优先级：system 约�
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d052
+npm run demo:d053
 ```
 
 ## 边界
 
-当前优先级是确定性规则，不使用模型摘要；工具组只有完整容纳时才保留，单独的工具消息不会被拼入请求。
+当前截断按字符数执行；工具结果只保留头部，未实现字段级 JSON 摘要、引用抽取或模型摘要。截断是可见的，不把截断结果伪装成完整输出。

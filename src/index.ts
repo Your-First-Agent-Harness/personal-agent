@@ -14,6 +14,8 @@ export { measureContextBudget, messageBudget, toolSchemaChars } from './context/
 export type { ContextBudgetInput, ContextBudgetReport } from './context/budget.ts';
 export { buildPrioritizedContext } from './context/priority.ts';
 export type { ContextDecision, ContextPriority, PrioritizedContext } from './context/priority.ts';
+export { truncateAssistantText, truncateToolResult } from './context/truncate.ts';
+export type { TruncationReport } from './context/truncate.ts';
 export type { AgentLoopOptions, AgentLoopResult } from './runtime/loop.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
