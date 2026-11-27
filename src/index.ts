@@ -95,5 +95,7 @@ export { runContextPressureCases } from './context/pressure.ts';
 export type { ContextPressureCase, ContextPressureResult } from './context/pressure.ts';
 export { acceptsLongTermMemory, classifyMemory } from './memory/layers.ts';
 export type { MemoryEntry, MemoryLayer } from './memory/layers.ts';
+export { MemoryWriter } from './memory/writer.ts';
+export type { MemoryCandidate, MemoryWriteResult } from './memory/writer.ts';
 export { runD050G2Demo } from './demo/d050.ts';
 export type { D050G2Report } from './demo/d050.ts';

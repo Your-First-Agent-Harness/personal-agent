@@ -63,6 +63,7 @@
     "demo:d059": "node scripts/d059-recovery.ts",
     "demo:d060": "node scripts/d060-context-baseline.ts",
     "demo:d061": "node scripts/d061-memory-layers.ts",
+    "demo:d062": "node scripts/d062-memory-writer.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
