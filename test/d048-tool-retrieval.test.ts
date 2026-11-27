@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { Tool, ToolSchema } from '../src/core/tool.ts';
 import { DynamicToolRegistry } from '../src/tools/dynamic-registry.ts';
-import { searchToolSchemas } from '../src/tools/retrieval.ts';
+import { searchToolMatches, searchToolSchemas } from '../src/tools/retrieval.ts';
 import { ToolRegistry } from '../src/tools/registry.ts';
 
 function schema(name: string, description: string): ToolSchema {
@@ -49,6 +49,17 @@ describe('D048 确定性词法工具检索', () => {
     ]);
   });
 
+  it('标签命中可用于补充能力检索，结果仍按分数和目录顺序稳定排序', () => {
+    const catalog = [
+      { ...schema('crm_lookup', '查询客户'), metadata: { tags: ['客户关系', '外部系统'] } },
+      { ...schema('calendar_create', '创建日程'), metadata: { tags: ['工作流'] } },
+    ];
+
+    expect(searchToolMatches(catalog, '外部系统')).toMatchObject([
+      { tool: { name: 'crm_lookup' }, score: 24 },
+    ]);
+  });
+
   it('同分保持目录顺序，limit 截断且默认最多返回五项', () => {
     const catalog = Array.from({ length: 7 }, (_, index) =>
       schema(`tool_${index}`, '共同 searchable 描述'));
@@ -73,6 +84,18 @@ describe('D048 确定性词法工具检索', () => {
 });
 
 describe('D048 DynamicToolRegistry 目录与策略', () => {
+  it('search 暴露稳定分数，list 只暴露 Schema', () => {
+    const registry = new DynamicToolRegistry({ limit: 2 });
+    registry.register(tool('weather_current', '查询当前天气'), {
+      metadata: { tags: ['外部系统'] },
+    });
+
+    expect(registry.search('外部系统')).toMatchObject([
+      { tool: { name: 'weather_current' }, score: 24 },
+    ]);
+    expect(registry.list('外部系统')[0]).not.toHaveProperty('metadata');
+  });
+
   it('catalog 保留全量策略可见 Schema，list 只返回查询子集且不加载 eager 以外的行为', () => {
     const registry = new DynamicToolRegistry({ limit: 1 });
     registry.register(tool('weather_current', '查询当前天气'));
