@@ -1,12 +1,12 @@
-# D081 · 统一 Trace/Span 模型
+# D082 · Trace 持久化与 Replay 输入
 
-D081 增加进程内 Trace Recorder：每次任务运行可以创建根 span 和子 span，记录父子关系、开始/结束时间和结构化属性，为后续 Replay/Eval 提供统一事件边界。
+D082 增加内存 Trace Store：保存不可变的 trace 快照，并从 span 序列生成确定性的 Replay 输入，作为后续 Replay 执行器的输入契约。
 
 ## 产出
 
-- `src/observability/trace.ts`：Trace/Span 记录器。
-- `test/d081-trace.test.ts`：父子 span、时间、属性和未知 span 测试。
-- `scripts/d081-trace.ts`：可复现验收脚本。
+- `src/observability/trace-store.ts`：Trace 快照存储和 Replay 输入生成。
+- `test/d082-trace-store.test.ts`：保存、查询、复制边界和 Replay 输入测试。
+- `scripts/d082-trace-store.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -15,9 +15,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d081
+npm run demo:d082
 ```
 
 ## 边界
 
-当前 Trace Recorder 仅驻留内存，不接入 OpenTelemetry、日志文件或远程 collector；时间戳用于组件级链路验证，不代表生产观测可靠性。
+当前快照只存在内存，不写文件或数据库；Replay 输入只描述 span 名称和属性，不执行真实模型或工具调用。
