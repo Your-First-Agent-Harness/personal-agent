@@ -78,6 +78,8 @@ export { compareApiManifests } from './api/compatibility.ts';
 export type { ApiManifest } from './api/compatibility.ts';
 export { inspectProductization } from './release/productization.ts';
 export type { ProductizationReport } from './release/productization.ts';
+export { createReleaseAudit } from './release/audit.ts';
+export type { AuditItem, ReleaseAudit } from './release/audit.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {

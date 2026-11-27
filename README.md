@@ -1,12 +1,13 @@
-# D096 · 产品化全链路验收
+# D097 · RC 发布审计
 
-D096 将 CLI 任务、配置展示和工具能力清单串成可复现的本地产品化验收，确认构建产物可执行且敏感配置不会进入输出。
+D097 增加发布审计模型，把 lint、typecheck、测试和产品化验收绑定为带证据的审计项，为 `v1.0.0-rc.1` 做准备。
 
 ## 产出
 
-- `scripts/d096-product-acceptance.ts`：综合 CLI 验收脚本。
-- `test/d096-product-acceptance.test.ts`：构建产物和验收回归测试。
-- `docs/product-acceptance.md`：验收步骤与能力边界。
+- `src/release/audit.ts`：发布审计聚合器。
+- `test/d097-release-audit.test.ts`：全通过和失败阻断测试。
+- `scripts/d097-release-audit.ts`：可复现审计脚本。
+- `docs/release-audit.md`：审计边界和证据说明。
 
 ## 复现
 
@@ -15,9 +16,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d096
+npm run demo:d097
 ```
 
 ## 边界
 
-D096 是本地构建产物验收，不证明真实模型、跨机器部署、持久化队列或生产身份系统。
+审计只聚合仓库内可复核证据，不冒充真实用户流量、外部模型质量或跨平台生产演练。
