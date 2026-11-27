@@ -2,6 +2,23 @@
 
 本项目的重要变更记录于此。
 
+## [0.2.0] - 2026-12-30
+
+### Added
+
+- D050 G2 联合验收：动态工具检索、Open-Meteo 外部 API、MCP local/MCP 双后端。
+- `tools_retrieved` 检索审计事件与稳定匹配分数。
+- `npm run demo:d050` 和 `docs/releases/v0.2.0.md`。
+
+### Verified
+
+- 62 个测试文件、537 项测试通过。
+- lint、typecheck、build 和 D050 G2 acceptance 全部通过。
+
+### Notes
+
+- v0.2.0 仍不包含 G3 的 100 轮长任务、成本目标，也不包含 G4 的 trace/replay/eval CI 关卡。
+
 ## [0.1.0] - 2026-12-05
 
 ### Added

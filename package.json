@@ -1,6 +1,6 @@
 {
   "name": "personal-agent",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "A from-scratch Agent Harness with pluggable tools and an offline G1 demo.",
@@ -10,7 +10,7 @@
   "files": [
     "dist",
     "docs/install.md",
-    "docs/releases/v0.1.0.md"
+    "docs/releases/v0.2.0.md"
   ],
   "bin": {
     "personal-agent": "./dist/cli/main.js"
@@ -51,6 +51,7 @@
     "demo:d046": "node scripts/d046-security.ts",
     "demo:d048": "node scripts/d048-dynamic-tools.ts",
     "demo:d049": "node --env-file-if-exists=.env scripts/d049-retrieval.ts",
+    "demo:d050": "node --env-file-if-exists=.env scripts/d050-g2-acceptance.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
