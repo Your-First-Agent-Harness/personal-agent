@@ -1,6 +1,6 @@
 {
   "name": "personal-agent",
-  "version": "0.4.0",
+  "version": "1.0.0-rc.1",
   "private": true,
   "type": "module",
   "description": "A from-scratch Agent Harness with pluggable tools and an offline G1 demo.",
@@ -98,6 +98,7 @@
     "demo:d095": "node scripts/d095-productization.ts",
     "demo:d096": "node scripts/d096-product-acceptance.ts",
     "demo:d097": "node scripts/d097-release-audit.ts",
+    "demo:d098": "node scripts/d098-rc-acceptance.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
