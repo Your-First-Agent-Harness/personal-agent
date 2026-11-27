@@ -68,6 +68,8 @@ export { ApprovalStore, runApprovalCli } from './cli/approval-cli.ts';
 export type { ApprovalDecision, ApprovalRecord } from './cli/approval-cli.ts';
 export { TenantStore } from './runtime/tenant-store.ts';
 export type { TenantItem, TenantRecord } from './runtime/tenant-store.ts';
+export { migrateRecord } from './runtime/migration.ts';
+export type { Migration, VersionedRecord } from './runtime/migration.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
