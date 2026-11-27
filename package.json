@@ -84,6 +84,7 @@
     "demo:d081": "node scripts/d081-trace.ts",
     "demo:d082": "node scripts/d082-trace-store.ts",
     "demo:d083": "node scripts/d083-replay.ts",
+    "demo:d084": "node scripts/d084-eval.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
