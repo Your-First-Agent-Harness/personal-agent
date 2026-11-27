@@ -1,12 +1,12 @@
-# D073 · 任务取消、暂停和恢复
+# D074 · 子 Agent 接口与边界
 
-D073 增加任务控制状态机，支持 queued/running/paused/cancelled/completed 状态，取消只能发生在未完成任务上，暂停后可以恢复，非法状态转换明确失败。
+D074 定义子 Agent 的父任务关系、任务描述、工具白名单、独立预算和深度，禁止自引用，并提供执行前的工具权限判断。
 
 ## 产出
 
-- `src/runtime/task-control.ts`：任务控制器。
-- `test/d073-task-control.test.ts`：正常状态流、取消优先和非法转换测试。
-- `scripts/d073-task-control.ts`：可复现验收脚本。
+- `src/runtime/sub-agent.ts`：子 Agent 规格和工具准入函数。
+- `test/d074-sub-agent.test.ts`：父子关系、预算、深度和工具白名单测试。
+- `scripts/d074-sub-agent.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D073 增加任务控制状态机，支持 queued/running/paused/cancelled/comple
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d073
+npm run demo:d074
 ```
 
 ## 边界
 
-当前控制器只管理状态，不会主动终止 Worker 进程或持久化状态；真实取消信号和恢复检查点需要后续接入运行器。
+本日只定义子 Agent 契约和边界，不启动真实子 Agent、不并行调度，也不允许子 Agent 绕过父任务权限；并行编排留到 D075。
