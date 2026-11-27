@@ -63,6 +63,7 @@ export { runD085G4Acceptance } from './demo/d085.ts';
 export { runTaskCli, taskStorePath } from './cli/task-cli.ts';
 export type { CliTask } from './cli/task-cli.ts';
 export { redactConfig, runConfigCli } from './cli/config-cli.ts';
+export { discoverTools, runToolsCli } from './cli/tools-cli.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {

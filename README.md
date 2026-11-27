@@ -1,15 +1,13 @@
-# D087 · 配置文件与环境变量覆盖
+# D088 · 工具注册与能力清单 CLI
 
-D087 增加 `config show` CLI：读取 `agent.config.json`，应用已有的 `PA_*` 环境变量覆盖，并在展示配置时脱敏模型 API key。
+D088 增加 `tools list` CLI，复用 `ToolRegistry.discover()` 展示当前内置工具的名称、版本、描述和完整 JSON Schema 元数据。
 
 ## 命令
 
 ```bash
-node dist/cli/main.js config show
-node dist/cli/main.js config show --json
+node dist/cli/main.js tools list
+node dist/cli/main.js tools list --json
 ```
-
-配置优先级：环境变量 > `agent.config.json` > 默认值。API key 只显示 `[REDACTED]`，不会写入 CLI 输出。
 
 ## 复现
 
@@ -18,9 +16,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d087
+npm run demo:d088
 ```
 
 ## 边界
 
-D087 只提供配置读取、校验和安全展示，不修改配置文件、不管理密钥、不连接远程配置中心。
+D088 只提供能力发现，不动态安装插件、不执行工具、不修改注册表；插件生命周期和权限审批留待后续产品化任务。
