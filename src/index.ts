@@ -41,6 +41,8 @@ export { TaskController } from './runtime/task-control.ts';
 export type { ControlledTask, ControlledTaskStatus } from './runtime/task-control.ts';
 export { canUseSubAgentTool, createSubAgentSpec } from './runtime/sub-agent.ts';
 export type { SubAgentSpec } from './runtime/sub-agent.ts';
+export { aggregateParallelResults, runParallelAgents } from './runtime/parallel-agents.ts';
+export type { ParallelAgentResult } from './runtime/parallel-agents.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {

@@ -1,12 +1,12 @@
-# D074 · 子 Agent 接口与边界
+# D075 · 并行子 Agent 编排与结果聚合
 
-D074 定义子 Agent 的父任务关系、任务描述、工具白名单、独立预算和深度，禁止自引用，并提供执行前的工具权限判断。
+D075 增加独立子任务的并行执行器和结果聚合器：成功结果继续汇总，单个子 Agent 失败被隔离并带任务 id 返回，不拖垮其他独立任务。
 
 ## 产出
 
-- `src/runtime/sub-agent.ts`：子 Agent 规格和工具准入函数。
-- `test/d074-sub-agent.test.ts`：父子关系、预算、深度和工具白名单测试。
-- `scripts/d074-sub-agent.ts`：可复现验收脚本。
+- `src/runtime/parallel-agents.ts`：并行执行和聚合 API。
+- `test/d075-parallel-agents.test.ts`：全成功和部分失败测试。
+- `scripts/d075-parallel-agents.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D074 定义子 Agent 的父任务关系、任务描述、工具白名单、独�
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d074
+npm run demo:d075
 ```
 
 ## 边界
 
-本日只定义子 Agent 契约和边界，不启动真实子 Agent、不并行调度，也不允许子 Agent 绕过父任务权限；并行编排留到 D075。
+当前并行器不自动限制并发数、不持久化子任务、不接入父 Agent 预算；这些资源隔离和调度约束留到 D076/D077。
