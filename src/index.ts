@@ -43,6 +43,8 @@ export { canUseSubAgentTool, createSubAgentSpec } from './runtime/sub-agent.ts';
 export type { SubAgentSpec } from './runtime/sub-agent.ts';
 export { aggregateParallelResults, runParallelAgents } from './runtime/parallel-agents.ts';
 export type { ParallelAgentResult } from './runtime/parallel-agents.ts';
+export { validateSubAgentPolicy } from './runtime/sub-agent-policy.ts';
+export type { SubAgentPolicy } from './runtime/sub-agent-policy.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
