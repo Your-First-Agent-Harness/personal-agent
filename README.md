@@ -1,12 +1,12 @@
-# D078 · 托管运行记录与 Run Store
+# D079 · 运行时恢复与幂等增强
 
-D078 增加内存 Run Store，为后台任务保存运行 id、任务 id、事件、结果和错误，支持查询并禁止结束后继续追加或重复结束。
+D079 增加工具调用幂等记录：重复调用可以返回已完成结果，未知副作用状态被标记为 unknown 并冻结，避免在证据不足时自动重放。
 
 ## 产出
 
-- `src/runtime/run-store.ts`：运行记录存储。
-- `test/d078-run-store.test.ts`：正常生命周期和非法操作测试。
-- `scripts/d078-run-store.ts`：可复现验收脚本。
+- `src/runtime/idempotency.ts`：幂等记录和重复完成短路。
+- `test/d079-idempotency.test.ts`：重复 begin、重复完成和 unknown 状态测试。
+- `scripts/d079-idempotency.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D078 增加内存 Run Store，为后台任务保存运行 id、任务 id、事�
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d078
+npm run demo:d079
 ```
 
 ## 边界
 
-当前 Run Store 是内存实现，尚未接入 SQLite、清理策略或重启恢复；本日固定托管运行记录语义。
+当前幂等存储是内存实现，尚未与 Run Store/SQLite 自动绑定；unknown 状态不会自动查询外部权威系统，避免把未知当成功。
