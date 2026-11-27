@@ -66,6 +66,8 @@ export { redactConfig, runConfigCli } from './cli/config-cli.ts';
 export { discoverTools, runToolsCli } from './cli/tools-cli.ts';
 export { ApprovalStore, runApprovalCli } from './cli/approval-cli.ts';
 export type { ApprovalDecision, ApprovalRecord } from './cli/approval-cli.ts';
+export { TenantStore } from './runtime/tenant-store.ts';
+export type { TenantItem, TenantRecord } from './runtime/tenant-store.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
