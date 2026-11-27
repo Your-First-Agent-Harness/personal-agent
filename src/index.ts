@@ -1,4 +1,4 @@
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 
 export type { ChatRequest, ChatResult, ModelProvider } from './adapters/model/provider.ts';
 export type { Tool, ToolContext, ToolSchema } from './core/tool.ts';
@@ -75,3 +75,5 @@ export { runD048Demo } from './demo/d048.ts';
 export type { D048DemoReport, D048RequestReport } from './demo/d048.ts';
 export { runD049Demo } from './demo/d049.ts';
 export type { D049RetrievalReport } from './demo/d049.ts';
+export { runD050G2Demo } from './demo/d050.ts';
+export type { D050G2Report } from './demo/d050.ts';
