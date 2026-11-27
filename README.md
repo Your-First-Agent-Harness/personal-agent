@@ -1,12 +1,12 @@
-# D056 · 工具 Schema 分组与按需展开
+# D057 · 上下文预算压力测试
 
-D056 将大量工具 Schema 按确定性大小分组，调用方先看到分组边界，需要时只展开指定组，避免一次性把完整工具目录放入上下文。
+D057 建立可重复的上下文压力用例，覆盖短历史、大工具目录和超长工具结果，确认统一预算模型能够报告适配与超预算，而不是静默放大上限。
 
 ## 产出
 
-- `src/tools/schema-groups.ts`：Schema 分组和按组展开 API。
-- `test/d056-schema-groups.test.ts`：分组、展开和非法参数测试。
-- `scripts/d056-schema-groups.ts`：可复现验收脚本。
+- `src/context/pressure.ts`：压力用例执行器。
+- `test/d057-pressure.test.ts`：三类压力回归测试。
+- `scripts/d057-pressure.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D056 将大量工具 Schema 按确定性大小分组，调用方先看到分组�
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d056
+npm run demo:d057
 ```
 
 ## 边界
 
-当前分组是确定性数量分组，尚未把分组协议接入模型 Provider，也不替代 D049 的相关性检索；未展开的组不会自动执行工具。
+当前压力测试测量字符预算，不是 tokenizer token 或真实延迟基准；超预算报告不会自动决定压缩策略。
