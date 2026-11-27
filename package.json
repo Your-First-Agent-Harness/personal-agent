@@ -68,6 +68,7 @@
     "demo:d064": "node scripts/d064-memory-conflicts.ts",
     "demo:d065": "node scripts/d065-task-plan.ts",
     "demo:d066": "node scripts/d066-cost.ts",
+    "demo:d067": "node scripts/d067-cost-budget.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
