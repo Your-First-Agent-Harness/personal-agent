@@ -1,13 +1,13 @@
-# D097 · RC 发布审计
+# D098 · v1.0.0-rc.1 发布
 
-D097 增加发布审计模型，把 lint、typecheck、测试和产品化验收绑定为带证据的审计项，为 `v1.0.0-rc.1` 做准备。
+D098 将产品化版本升级到 `1.0.0-rc.1`，并执行 RC 版本、产品化结构和发布审计的综合验收。
 
 ## 产出
 
-- `src/release/audit.ts`：发布审计聚合器。
-- `test/d097-release-audit.test.ts`：全通过和失败阻断测试。
-- `scripts/d097-release-audit.ts`：可复现审计脚本。
-- `docs/release-audit.md`：审计边界和证据说明。
+- `src/demo/d098.ts`：RC 验收链路。
+- `test/d098-rc.test.ts`：RC 回归测试。
+- `scripts/d098-rc-acceptance.ts`：可复现 RC 脚本。
+- `docs/releases/v1.0.0-rc.1.md`：RC 发布说明。
 
 ## 复现
 
@@ -16,9 +16,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d097
+npm run demo:d098
 ```
 
 ## 边界
 
-审计只聚合仓库内可复核证据，不冒充真实用户流量、外部模型质量或跨平台生产演练。
+RC 仍不宣称完成真实用户规模、分布式部署或线上模型质量目标；这些证据不能由本地确定性 Demo 替代。
