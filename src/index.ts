@@ -87,5 +87,7 @@ export { runD049Demo } from './demo/d049.ts';
 export type { D049RetrievalReport } from './demo/d049.ts';
 export { expandToolSchemaGroup, groupToolSchemas } from './tools/schema-groups.ts';
 export type { ToolSchemaGroup } from './tools/schema-groups.ts';
+export { runContextPressureCases } from './context/pressure.ts';
+export type { ContextPressureCase, ContextPressureResult } from './context/pressure.ts';
 export { runD050G2Demo } from './demo/d050.ts';
 export type { D050G2Report } from './demo/d050.ts';
