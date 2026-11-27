@@ -74,6 +74,8 @@ export { PersonalAgentClient } from './sdk.ts';
 export type { TaskHandle, TaskSubmission } from './sdk.ts';
 export { createHealthReport } from './runtime/health.ts';
 export type { HealthReport } from './runtime/health.ts';
+export { compareApiManifests } from './api/compatibility.ts';
+export type { ApiManifest } from './api/compatibility.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
