@@ -1,12 +1,12 @@
-# D079 · 运行时恢复与幂等增强
+# D080 · 任务编排阶段总结
 
-D079 增加工具调用幂等记录：重复调用可以返回已完成结果，未知副作用状态被标记为 unknown 并冻结，避免在证据不足时自动重放。
+D080 汇总 D071–D079 的队列、后台运行、任务控制、子 Agent、并行、DAG、Run Store 和幂等能力，建立最小编排链路基线，并明确当前距离生产托管运行的边界。
 
 ## 产出
 
-- `src/runtime/idempotency.ts`：幂等记录和重复完成短路。
-- `test/d079-idempotency.test.ts`：重复 begin、重复完成和 unknown 状态测试。
-- `scripts/d079-idempotency.ts`：可复现验收脚本。
+- `docs/orchestration.md`：任务编排能力总结和证据索引。
+- `scripts/d080-orchestration-baseline.ts`：队列→运行记录→幂等基线脚本。
+- `test/d080-orchestration-baseline.test.ts`：阶段回归测试。
 
 ## 复现
 
@@ -14,9 +14,16 @@ D079 增加工具调用幂等记录：重复调用可以返回已完成结果，
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d079
+npm run build
+npm run demo:d080
+```
+
+成功时必须看到：
+
+```text
+D080 ORCHESTRATION BASELINE PASS
 ```
 
 ## 边界
 
-当前幂等存储是内存实现，尚未与 Run Store/SQLite 自动绑定；unknown 状态不会自动查询外部权威系统，避免把未知当成功。
+当前主要是进程内内存组件，不伪装成跨进程生产队列；D081 开始进入 trace、span 和可观测性阶段，为 G4 做准备。
