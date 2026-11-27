@@ -1,12 +1,12 @@
-# D082 · Trace 持久化与 Replay 输入
+# D083 · Replay 执行器
 
-D082 增加内存 Trace Store：保存不可变的 trace 快照，并从 span 序列生成确定性的 Replay 输入，作为后续 Replay 执行器的输入契约。
+D083 增加确定性 Replay 执行器，按 Trace 输入顺序逐步调用注入的执行函数，返回每一步输出；执行器异常原样暴露，不把失败伪装成成功。
 
 ## 产出
 
-- `src/observability/trace-store.ts`：Trace 快照存储和 Replay 输入生成。
-- `test/d082-trace-store.test.ts`：保存、查询、复制边界和 Replay 输入测试。
-- `scripts/d082-trace-store.ts`：可复现验收脚本。
+- `src/observability/replay.ts`：ReplayStep、ReplayResult 和顺序执行器。
+- `test/d083-replay.test.ts`：正常回放和执行失败测试。
+- `scripts/d083-replay.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -15,9 +15,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d082
+npm run demo:d083
 ```
 
 ## 边界
 
-当前快照只存在内存，不写文件或数据库；Replay 输入只描述 span 名称和属性，不执行真实模型或工具调用。
+当前 Replay 只执行注入的确定性回调，不重建真实模型上下文、不调用在线服务，也不声称能够复现真实模型随机性。
