@@ -54,6 +54,7 @@
     "demo:d050": "node --env-file-if-exists=.env scripts/d050-g2-acceptance.ts",
     "demo:d051": "node scripts/d051-context-budget.ts",
     "demo:d052": "node scripts/d052-context-priority.ts",
+    "demo:d053": "node scripts/d053-truncation.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
