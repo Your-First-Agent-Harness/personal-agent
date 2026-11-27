@@ -83,6 +83,7 @@
     "demo:d080": "node scripts/d080-orchestration-baseline.ts",
     "demo:d081": "node scripts/d081-trace.ts",
     "demo:d082": "node scripts/d082-trace-store.ts",
+    "demo:d083": "node scripts/d083-replay.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",

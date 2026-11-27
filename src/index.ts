@@ -55,6 +55,8 @@ export { TraceRecorder } from './observability/trace.ts';
 export type { TraceSpan } from './observability/trace.ts';
 export { TraceStore, createReplayInput } from './observability/trace-store.ts';
 export type { TraceSnapshot } from './observability/trace-store.ts';
+export { replayTrace } from './observability/replay.ts';
+export type { ReplayResult, ReplayStep } from './observability/replay.ts';
 export { createBuiltinTools } from './tools/builtin.ts';
 export { createKnowledgeTools } from './tools/knowledge.ts';
 export type {
