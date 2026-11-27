@@ -77,6 +77,7 @@
     "demo:d074": "node scripts/d074-sub-agent.ts",
     "demo:d075": "node scripts/d075-parallel-agents.ts",
     "demo:d076": "node scripts/d076-sub-agent-policy.ts",
+    "demo:d077": "node scripts/d077-task-dag.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
