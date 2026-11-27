@@ -70,6 +70,7 @@
     "demo:d066": "node scripts/d066-cost.ts",
     "demo:d067": "node scripts/d067-cost-budget.ts",
     "demo:d068": "node scripts/d068-benchmark.ts",
+    "demo:d069": "node scripts/d069-g3-acceptance.ts",
     "mcp:server": "node src/demo/d036-mcp-server.ts"
   },
   "license": "MIT",
