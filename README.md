@@ -1,13 +1,12 @@
-# D095 · 产品化发布清单
+# D096 · 产品化全链路验收
 
-D095 固化发布前产品化结构检查：包元数据、根入口、CLI bin、构建产物和部署文档必须同时存在，为后续 RC 验收减少遗漏。
+D096 将 CLI 任务、配置展示和工具能力清单串成可复现的本地产品化验收，确认构建产物可执行且敏感配置不会进入输出。
 
 ## 产出
 
-- `src/release/productization.ts`：产品化清单检查器。
-- `test/d095-productization.test.ts`：当前仓库清单回归测试。
-- `scripts/d095-productization.ts`：可复现验收脚本。
-- `docs/productization.md`：清单和真实能力边界。
+- `scripts/d096-product-acceptance.ts`：综合 CLI 验收脚本。
+- `test/d096-product-acceptance.test.ts`：构建产物和验收回归测试。
+- `docs/product-acceptance.md`：验收步骤与能力边界。
 
 ## 复现
 
@@ -16,9 +15,9 @@ npm run lint
 npm run typecheck
 npm test
 npm run build
-npm run demo:d095
+npm run demo:d096
 ```
 
 ## 边界
 
-清单只验证仓库结构和本地构建产物，不替代真实 npm 安装、跨平台运行、认证、持久化或线上演练。
+D096 是本地构建产物验收，不证明真实模型、跨机器部署、持久化队列或生产身份系统。
