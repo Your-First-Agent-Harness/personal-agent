@@ -1,12 +1,12 @@
-# D055 · 会话摘要与任务状态摘要
+# D056 · 工具 Schema 分组与按需展开
 
-D055 将长会话中的目标、已完成步骤、失败步骤、待办和系统约束转换为结构化 `TaskSummary`，并提供稳定文本格式，供后续压缩、恢复和长任务状态机使用。
+D056 将大量工具 Schema 按确定性大小分组，调用方先看到分组边界，需要时只展开指定组，避免一次性把完整工具目录放入上下文。
 
 ## 产出
 
-- `src/context/task-summary.ts`：任务摘要模型、提取器和格式化器。
-- `test/d055-task-summary.test.ts`：成功、失败和待办状态测试。
-- `scripts/d055-task-summary.ts`：可复现验收脚本。
+- `src/tools/schema-groups.ts`：Schema 分组和按组展开 API。
+- `test/d056-schema-groups.test.ts`：分组、展开和非法参数测试。
+- `scripts/d056-schema-groups.ts`：可复现验收脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D055 将长会话中的目标、已完成步骤、失败步骤、待办和系统
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d055
+npm run demo:d056
 ```
 
 ## 边界
 
-当前通过结构化工具结果文本识别失败状态，不替代正式 Run 状态机；尚未持久化，也不声称可以理解任意自然语言中的全部任务状态。
+当前分组是确定性数量分组，尚未把分组协议接入模型 Provider，也不替代 D049 的相关性检索；未展开的组不会自动执行工具。
