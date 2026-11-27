@@ -1,4 +1,4 @@
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 
 export type { ChatRequest, ChatResult, ModelProvider } from './adapters/model/provider.ts';
 export type { Tool, ToolContext, ToolSchema } from './core/tool.ts';
