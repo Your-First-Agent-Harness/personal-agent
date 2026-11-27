@@ -1,12 +1,12 @@
-# D067 · 成本预算与降级策略
+# D068 · 长任务质量基准
 
-D067 为任务成本增加 continue/degrade/stop 三段式决策：低于阈值继续，接近预算时降级模型或工具策略，达到上限时停止，避免成本无界增长。
+D068 建立 10/30/50/100 轮任务的统一 Benchmark 结果和汇总模型，记录完成率、工具错误数和成本，为 G3 阶段验收提供可重复的指标入口。
 
 ## 产出
 
-- `src/runtime/cost-budget.ts`：成本预算决策。
-- `test/d067-cost-budget.test.ts`：三种决策和非法参数测试。
-- `scripts/d067-cost-budget.ts`：可复现验收脚本。
+- `src/runtime/benchmark.ts`：Benchmark 结果与汇总器。
+- `test/d068-benchmark.test.ts`：完成率、成本和空集测试。
+- `scripts/d068-benchmark.ts`：10/30/50/100 轮基线脚本。
 
 ## 复现
 
@@ -14,9 +14,9 @@ D067 为任务成本增加 continue/degrade/stop 三段式决策：低于阈值�
 npm run lint
 npm run typecheck
 npm test
-npm run demo:d067
+npm run demo:d068
 ```
 
 ## 边界
 
-当前只返回决策，不自动切换模型或修改工具清单；预算单位仍是内部计量单位，不等同于实际货币成本。
+当前脚本使用确定性结果样本验证指标计算，不代表真实模型长任务表现；G3 的 40% 成本目标必须基于真实可复跑基线，不由本日样本直接推断。
